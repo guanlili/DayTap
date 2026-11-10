@@ -26,4 +26,13 @@ enum DayTapFormat {
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return "DayTap-\(formatter.string(from: createdAt)).m4a"
     }
+
+    /// 分享文件名(#2):重命名过的跟名字走,没起名退回时间戳。斜杠换掉,避免被当成路径。
+    static func shareFilename(name: String?, createdAt: Date) -> String {
+        if let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            let sanitized = trimmed.replacingOccurrences(of: "/", with: "-")
+            return "\(sanitized).m4a"
+        }
+        return shareFilename(createdAt: createdAt)
+    }
 }
