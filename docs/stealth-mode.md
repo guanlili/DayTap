@@ -27,11 +27,21 @@
 | voiceDrop | 0.22 | 低于此才重置计时(迟滞,防阈值边缘抖动) |
 | armedTimeout | 600s | 武装静默超时自动解除 |
 
-## 真机验证清单(待验,开发版先模拟器编译通过)
+## 验证清单
+
+**模拟器已验(watchOS 27.2 / Series 12,2026-11-10,见 issue #13 评论)**
+
+- [x] 进入即自动武装(麦克风预授权后 `armed buffer started` 即现)
+- [x] VAD 触发链路:语音播放 → 约 1s 判定 → promoted + stealth commit
+- [x] promote 为改名而非复制(tmp 无残留,曲库文件就位)
+- [x] **rename 后录音不断流**:晋级后 6 秒增长 37KB,与 48kbps 编码率吻合
+- 发现①:环境音可能误触(模拟器上无明确人声也 commit 过一次),voiceLevel/voiceHold 真机调优时留意
+- 发现②:`reconcileOrphans()` 在 `retryPending()` 的激活守卫之后,会话未激活时孤儿不回收——建议解耦,归入后续小修
+
+**真机待验(甲方)**
 
 - [ ] 按表冠回表盘后**继续录**(UIBackgroundModes=audio 生效)
 - [ ] 武装态降腕 5 分钟,VAD 仍能触发(应用未被挂起)
-- [ ] **promote 的 rename 不打断录音**:开录后文件持续增长、播放无断裂
 - [ ] 息屏状态下 AssistiveTouch 握拳能否触发快捷指令;App 在后台时意图能否启停
 - [ ] 录音中抬腕:表盘/状态区麦克风指示的可见性(各 watchOS 版本)
 - [ ] 武装态 1 小时电量与发热
