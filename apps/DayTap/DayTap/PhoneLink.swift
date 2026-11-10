@@ -39,12 +39,14 @@ final class PhoneLink: NSObject, ObservableObject {
         DayTapLog.link.info("iPhone WCSession activate requested")
     }
 
-    /// 分享时复制一份带日期的文件名，避免得到里只看到一长串 UUID。
+    /// 分享时复制一份带名字的文件名，避免得到里只看到一长串 UUID。起了名跟名字走(#2)。
     func shareFileURL(for record: RecordingRecord) -> URL? {
         let source = library.fileURL(id: record.id)
         guard FileManager.default.fileExists(atPath: source.path) else { return nil }
         let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent(DayTapFormat.shareFilename(createdAt: record.createdAt))
+            .appendingPathComponent(
+                DayTapFormat.shareFilename(name: record.displayName, createdAt: record.createdAt)
+            )
         try? FileManager.default.removeItem(at: destination)
         do {
             try FileManager.default.copyItem(at: source, to: destination)

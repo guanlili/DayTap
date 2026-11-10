@@ -2,16 +2,20 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// iPhone 上的收件箱。不做录音。
-/// 分享：Track 2 交给得到大脑，或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
+/// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
+/// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
 struct RecordingListView: View {
     @ObservedObject private var link = PhoneLink.shared
     @ObservedObject private var library = PhoneLink.shared.library
+    @StateObject private var player = PlaybackCenter()
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var exportURL: URL?
     @State private var exportName = "DayTap.m4a"
     @State private var showExporter = false
     @State private var banner: String?
+    @State private var renamingRecord: RecordingRecord?
+    @State private var newName = ""
 
     var body: some View {
         NavigationStack {
@@ -49,8 +53,25 @@ struct RecordingListView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 link.activate()
+            } else if phase != .inactive {
+                player.reset()
             }
         }
+        .alert("重命名", isPresented: renameBinding) {
+            TextField("录音名称", text: $newName)
+            Button("保存") { commitRename() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("列表标题与分享、导出的文件名都会跟随新名字。留空则恢复默认时间戳名。")
+        }
+    }
+
+    /// 只在选中的那条还在时弹 alert,避免多条同时弹。
+    private var renameBinding: Binding<Bool> {
+        Binding(
+            get: { renamingRecord != nil },
+            set: { if !$0 { renamingRecord = nil } }
+        )
     }
 
     private var emptyState: some View {
@@ -88,19 +109,41 @@ struct RecordingListView: View {
     }
 
     private func row(_ record: RecordingRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(record.createdAt.formatted(date: .abbreviated, time: .shortened))
+        let fileExists = FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(record.title)
                 .font(.body.weight(.semibold))
-            Text("\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount)) · m4a")
+            Text(subtitle(for: record))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if player.playingID == record.id {
+                playbackBar(record)
+            }
+
             HStack(spacing: 16) {
-                let fileURL = link.library.fileURL(id: record.id)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
+                Button {
+                    guard fileExists else {
+                        banner = "找不到这条音频文件"
+                        return
+                    }
+                    player.toggle(record, fileURL: library.fileURL(id: record.id))
+                } label: {
+                    Label(
+                        player.playingID == record.id && player.isPlaying ? "暂停" : "试听",
+                        systemImage: player.playingID == record.id && player.isPlaying
+                            ? "pause.fill" : "play.fill"
+                    )
+                }
+                .disabled(!fileExists)
+                .accessibilityIdentifier("daytap.play.\(record.id)")
+
+                if fileExists, let shareURL = link.shareFileURL(for: record) {
                     ShareLink(
-                        item: DayTapAudioFile(url: fileURL),
+                        item: DayTapAudioFile(url: shareURL),
                         preview: SharePreview(
-                            DayTapFormat.shareFilename(createdAt: record.createdAt),
+                            record.title,
                             image: Image(systemName: "waveform")
                         )
                     ) {
@@ -108,18 +151,55 @@ struct RecordingListView: View {
                     }
                     .accessibilityIdentifier("daytap.share.\(record.id)")
                 }
+
                 Button {
                     prepareExport(record)
                 } label: {
                     Label("存到文件", systemImage: "folder")
                 }
+                .disabled(!fileExists)
             }
             .font(.callout)
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            Button {
+                newName = record.displayName ?? ""
+                renamingRecord = record
+            } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("daytap.recording.\(record.id)")
+    }
+
+    /// 试听进度:一行时间 + 细进度条。只占播放中那一行。
+    private func playbackBar(_ record: RecordingRecord) -> some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(DayTapFormat.clock(player.elapsed))
+                Spacer()
+                Text(DayTapFormat.clock(max(player.duration, record.durationSeconds)))
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+
+            ProgressView(value: player.progress)
+                .tint(.accentColor)
+        }
+        .accessibilityIdentifier("daytap.playback.\(record.id)")
+    }
+
+    private func subtitle(for record: RecordingRecord) -> String {
+        let date = record.createdAt.formatted(date: .abbreviated, time: .shortened)
+        let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount)) · m4a"
+        // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
+        if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return "\(date) · \(size)"
+        }
+        return size
     }
 
     private var trackNote: some View {
@@ -140,7 +220,18 @@ struct RecordingListView: View {
             return
         }
         exportURL = url
-        exportName = DayTapFormat.shareFilename(createdAt: record.createdAt)
+        exportName = url.lastPathComponent
         showExporter = true
+    }
+
+    /// 落名:取库里最新那条改,不覆盖传输状态的并发更新。空名=清掉,恢复时间戳名。
+    private func commitRename() {
+        guard let target = renamingRecord else { return }
+        renamingRecord = nil
+        guard var fresh = library.record(id: target.id) else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        fresh.displayName = trimmed.isEmpty ? nil : trimmed
+        library.upsert(fresh)
+        DayTapLog.library.info("renamed \(target.id, privacy: .public)")
     }
 }

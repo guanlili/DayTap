@@ -24,6 +24,17 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     var state: TransferState
     var lastError: String?
     var updatedAt: Date
+    /// 手机端重命名的显示名(#2)。nil=还没起过名,列表和分享名退回时间戳。
+    /// 可选字段,旧 index.json 解码为 nil,天然向后兼容;不参与手表传输协议。
+    var displayName: String?
+
+    /// 列表标题:起了名用名字,没起名用时间。
+    var title: String {
+        if let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
 
     /// 尚未被 iPhone 确认落盘，就还要负责把文件送出去。
     var awaitsPhoneAck: Bool {
