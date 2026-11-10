@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// 无感录音界面(#5):看起来就是一块报时表盘。
-/// 点一下开始/停止,握拳(AssistiveTouch 绑快捷指令)同样启停;
+/// 握拳(AssistiveTouch 绑快捷指令)、敲桌两下(#11)同样启停;
 /// 录着的时候按表冠回表盘继续录(audio 后台模式),不亮屏不出声。
 /// 手动触发:VAD 自动开录经甲方真机体验后撤下(环境音误触),2026-11-10。
+/// #23:显式红色大按钮替代整屏点按,甲方点名「普通的正常按键」。
 struct RecordingScreen: View {
     @ObservedObject var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
@@ -32,7 +33,7 @@ struct RecordingScreen: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else {
-                    Text("点一下或敲桌两下 · 录着可回表盘")
+                    Text("敲桌两下也行 · 录着可回表盘")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     transferBadge
@@ -61,14 +62,13 @@ struct RecordingScreen: View {
                         .accessibilityIdentifier("daytap.record.discard")
                     }
                 }
+
+                Spacer(minLength: 4)
+
+                recordButton
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture { model.toggle() }
-            .accessibilityIdentifier("daytap.record.toggle")
-            .accessibilityLabel(model.phase == .recording ? "正在录音,点按停止并保存" : "录音,点按开始")
-            .accessibilityAddTraits(.isButton)
             .alert("丢弃待传录音?", isPresented: $confirmDiscard) {
                 Button("丢弃", role: .destructive) { model.discardPending() }
                 Button("取消", role: .cancel) {}
@@ -128,6 +128,23 @@ struct RecordingScreen: View {
             }
             .accessibilityIdentifier("daytap.transfer.badge")
         }
+    }
+
+    /// 显式录音大按钮(#23):像语音备忘录那样一眼可见、可按。
+    /// 闲时=红色实心麦克风开录;录音中=白色方块停止。整屏点按(#5 遗产)随之退役。
+    private var recordButton: some View {
+        Button {
+            model.toggle()
+        } label: {
+            Image(systemName: model.phase == .recording ? "stop.fill" : "mic.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Circle().fill(Color.red))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(model.phase == .recording ? "停止并保存" : "开始录音")
+        .accessibilityIdentifier("daytap.record.toggle")
     }
 
     private func clock(_ date: Date) -> some View {
