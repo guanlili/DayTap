@@ -33,11 +33,11 @@ build_one() {
 }
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "watch" ]; then
-  build_one "DayTap Watch App" "generic/platform=watchOS Simulator" "watch"
+  build_one "DayTap Watch App" "generic/platform=watchOS" "watch"
 fi
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "phone" ]; then
-  build_one "DayTap" "generic/platform=iOS Simulator" "phone"
+  build_one "DayTap" "generic/platform=iOS" "phone"
 fi
 
 echo "== 通过 =="
