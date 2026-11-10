@@ -15,12 +15,31 @@ final class PhoneLink: NSObject, ObservableObject {
     @Published private(set) var status = "等手表把录音传过来"
     @Published private(set) var sessionReady = false
 
+    /// 已删除录音的 id 名单(#20)。手表可能还握着「传输未完成」的尾巴,
+    /// 重传到这里时直接回执丢弃,不让删掉的条目复活。UserDefaults 重装即清,
+    /// 但那时手表侧早已确认,本就不会再传。
+    private static let deletedIDsKey = "daytap.deletedIDs"
+    private static let deletedIDsCap = 200
+
     private override init() {
         library = RecordingLibrary(
             audioDirectory: DayTapFolders.documents,
             indexURL: DayTapFolders.appSupport.appendingPathComponent("index.json")
         )
         super.init()
+    }
+
+    /// 手机端删除入口(#20):索引+音频清掉,并记入防复活名单。
+    func forget(id: String) {
+        var ids = UserDefaults.standard.stringArray(forKey: Self.deletedIDsKey) ?? []
+        if !ids.contains(id) {
+            ids.append(id)
+            if ids.count > Self.deletedIDsCap {
+                ids.removeFirst(ids.count - Self.deletedIDsCap)
+            }
+            UserDefaults.standard.set(ids, forKey: Self.deletedIDsKey)
+        }
+        library.remove(id: id)
     }
 
     func activate() {
@@ -108,6 +127,13 @@ extension PhoneLink: WCSessionDelegate {
     func session(_ session: WCSession, didReceive file: WCSessionFile) {
         let metadata = file.metadata ?? [:]
         let id = TransferKeys.recordID(from: metadata)
+        // 删过的条目不复活(#20):回执让手表停止重传,收到的这份系统自己清掉。
+        if let deleted = UserDefaults.standard.stringArray(forKey: Self.deletedIDsKey),
+           deleted.contains(id) {
+            session.transferUserInfo(TransferKeys.ackMetadata(id: id))
+            DayTapLog.link.info("dropped deleted recording \(id, privacy: .public); acked")
+            return
+        }
         let createdAt = TransferKeys.dateValue(metadata[TransferKeys.createdAt]) ?? Date()
         let duration = TransferKeys.doubleValue(metadata[TransferKeys.durationSeconds])
         let bytes = Int(TransferKeys.doubleValue(metadata[TransferKeys.byteCount]))

@@ -21,6 +21,7 @@ struct RecordingListView: View {
     @State private var banner: String?
     @State private var renamingRecord: RecordingRecord?
     @State private var newName = ""
+    @State private var deletingRecord: RecordingRecord?
     @State private var transcriptRecord: RecordingRecord?
     @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
@@ -76,6 +77,16 @@ struct RecordingListView: View {
         } message: {
             Text("列表标题与分享、导出的文件名都会跟随新名字。留空则恢复默认时间戳名。")
         }
+        .confirmationDialog(
+            "删除「\(deletingRecord?.title ?? "")」？",
+            isPresented: deleteBinding,
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) { commitDelete() }
+            Button("取消", role: .cancel) { deletingRecord = nil }
+        } message: {
+            Text("手机上的音频与索引会一并删除，不可恢复。手表上的原件不受影响，也不会自动传回。")
+        }
         .sheet(item: $transcriptRecord) { record in
             TranscriptView(
                 recordID: record.id,
@@ -97,6 +108,13 @@ struct RecordingListView: View {
         Binding(
             get: { renamingRecord != nil },
             set: { if !$0 { renamingRecord = nil } }
+        )
+    }
+
+    private var deleteBinding: Binding<Bool> {
+        Binding(
+            get: { deletingRecord != nil },
+            set: { if !$0 { deletingRecord = nil } }
         )
     }
 
@@ -292,6 +310,12 @@ struct RecordingListView: View {
             } label: {
                 Label("重命名", systemImage: "pencil")
             }
+
+            Button(role: .destructive) {
+                deletingRecord = record
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
@@ -303,6 +327,12 @@ struct RecordingListView: View {
             .disabled(!fileExists)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                deletingRecord = record
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+
             if record.transcript != nil {
                 Button {
                     transcriptRecord = record
@@ -331,6 +361,16 @@ struct RecordingListView: View {
             return
         }
         player.toggle(record, fileURL: library.fileURL(id: record.id))
+    }
+
+    /// 落删(#20):删的是正在播的先停播,再清索引+文件并记入防复活名单。
+    private func commitDelete() {
+        guard let target = deletingRecord else { return }
+        deletingRecord = nil
+        if player.playingID == target.id {
+            player.reset()
+        }
+        link.forget(id: target.id)
     }
 
     /// 试听进度:一行时间 + 细进度条。只占播放中那一行,红进度与行首同色。
@@ -471,7 +511,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "hand.tap",
                         title: "轻点 · 长按 · 轻扫",
-                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名；左滑出「转文字」或「全文」，右滑出「分享」。"
+                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名 / 删除；左滑出「转文字」「全文」或「删除」，右滑出「分享」。"
                     )
                 }
 

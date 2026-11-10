@@ -84,6 +84,16 @@ final class RecordingLibrary: ObservableObject {
         return storage.first { $0.id == id }
     }
 
+    /// 手机端删除(#20):索引条目与音频文件一并清掉。
+    /// 只动手机这一侧;手表的传输状态与原件不受影响(已确认的不会重传)。
+    func remove(id: String) {
+        mutate { records in
+            records.removeAll { $0.id == id }
+        }
+        try? FileManager.default.removeItem(at: fileURL(id: id))
+        DayTapLog.library.info("removed \(id, privacy: .public)")
+    }
+
     func snapshot() -> [RecordingRecord] {
         lock.lock()
         defer { lock.unlock() }
