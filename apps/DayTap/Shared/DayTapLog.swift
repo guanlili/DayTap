@@ -7,4 +7,5 @@ enum DayTapLog {
     static let link = Logger(subsystem: "com.chriscui.daytap", category: "link")
     static let library = Logger(subsystem: "com.chriscui.daytap", category: "library")
     static let transcribe = Logger(subsystem: "com.chriscui.daytap", category: "transcribe")
+    static let motion = Logger(subsystem: "com.chriscui.daytap", category: "motion")
 }

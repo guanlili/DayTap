@@ -32,7 +32,7 @@ struct RecordingScreen: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else {
-                    Text("点一下录音 · 录着可回表盘")
+                    Text("点一下或敲桌两下 · 录着可回表盘")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     transferBadge
@@ -76,19 +76,27 @@ struct RecordingScreen: View {
                 Text("\(model.transferWaiting) 条不会传给 iPhone，手表上直接删除。")
             }
         }
-        .onAppear(perform: model.onAppear)
+        .onAppear {
+            model.onAppear()
+            model.setKnockListening(true)
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
                 model.onActive()
+                model.setKnockListening(true)
             case .background:
-                // audio 后台模式:录音继续,不在这里停(#5)。
-                break
+                // audio 后台模式:录音继续,不在这里停(#5);敲桌监听只在前台开。
+                model.setKnockListening(false)
             case .inactive:
                 break
             @unknown default:
                 break
             }
+        }
+        .onChange(of: model.phase) { _, phase in
+            // 录音中不听敲桌(开始即目的达成);停录回闲时重新武装(#11)。
+            model.setKnockListening(phase == .idle)
         }
     }
 

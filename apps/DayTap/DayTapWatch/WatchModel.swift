@@ -38,6 +38,8 @@ final class WatchModel: ObservableObject {
 
     private let capture = AudioCapture()
     private let link = WatchLink.shared
+    /// 敲桌两下检测(#11):只在闲时前台开,回表盘/录音中即停。
+    private let knock = KnockDetector()
     private var timer: Timer?
     private var startedAt: Date?
     private var recordingID: String?
@@ -46,6 +48,12 @@ final class WatchModel: ObservableObject {
     private init() {
         link.onChange = { [weak self] in
             self?.syncTransferState()
+        }
+        // 敲桌命中=点按:闲时开录。onTrigger 已派发主线程。
+        knock.onTrigger = { [weak self] in
+            guard let self, phase == .idle else { return }
+            DayTapLog.motion.info("knock → begin")
+            toggle()
         }
         linkStatus = link.statusText
         syncTransferState()
@@ -93,6 +101,16 @@ final class WatchModel: ObservableObject {
             finish(reason: nil)
         } else {
             begin()
+        }
+    }
+
+    /// 敲桌监听开关(#11):界面按「闲时且在前台」驱动;录音中与回表盘都不听。
+    func setKnockListening(_ active: Bool) {
+        if active {
+            guard phase == .idle, !knock.isRunning else { return }
+            knock.start()
+        } else {
+            knock.stop()
         }
     }
 
