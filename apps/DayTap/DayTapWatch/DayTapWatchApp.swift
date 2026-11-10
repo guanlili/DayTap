@@ -16,7 +16,8 @@ final class DayTapWatchDelegate: NSObject, WKApplicationDelegate {
 @main
 struct DayTapWatchApp: App {
     @WKApplicationDelegateAdaptor(DayTapWatchDelegate.self) private var delegate
-    @StateObject private var model = WatchModel()
+    /// 单例:AppIntent(握拳)与界面必须驱动同一个 WatchModel。
+    @StateObject private var model = WatchModel.shared
 
     var body: some Scene {
         WindowGroup {

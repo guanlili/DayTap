@@ -7,6 +7,8 @@ import Foundation
 final class AudioCapture {
     private var recorder: AVAudioRecorder?
     private(set) var fileURL: URL?
+    /// 武装态：录音器实际写着的临时缓冲文件（不在曲库目录，解除武装即删）。
+    private(set) var bufferURL: URL?
 
     var isRecording: Bool {
         recorder?.isRecording ?? false
@@ -58,9 +60,51 @@ final class AudioCapture {
         DayTapLog.recorder.info("recording started \(fileURL.lastPathComponent, privacy: .public)")
     }
 
+    /// 武装态开麦：录进临时文件，不进曲库（#5 的「缓冲不落盘」）。
+    /// 麦克风此时是活跃的——配合 audio 后台模式，降腕/回表盘后 VAD 依然活着。
+    func startBuffer() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("daytap-armed-\(UUID().uuidString).m4a")
+        try start(fileURL: tmp)
+        bufferURL = tmp
+        fileURL = nil
+        DayTapLog.recorder.info("armed buffer started \(tmp.lastPathComponent, privacy: .public)")
+    }
+
+    /// 武装态命中触发：把正被录音器写着的临时文件改名进曲库。
+    /// POSIX 语义下 rename 不影响已打开的 fd，录音器无感继续写，
+    /// 同一个文件天然带着触发前的缓冲头，无需任何拼接。
+    func promote(to target: URL) throws {
+        guard let recorder, recorder.isRecording, let source = bufferURL else {
+            throw CaptureError.failedToStart
+        }
+        try FileManager.default.createDirectory(
+            at: target.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: source, to: target)
+        bufferURL = nil
+        fileURL = target
+        DayTapLog.recorder.info("armed buffer promoted \(target.lastPathComponent, privacy: .public)")
+    }
+
     /// 停止并返回时长。文件留在 `fileURL`，调用方负责入队传输。
     func stop() -> TimeInterval? {
-        guard let recorder, let fileURL else { return nil }
+        guard let recorder, let fileURL else {
+            // 武装态解除：缓冲没有命中触发，整个丢弃，不留痕迹。
+            if let recorder {
+                let duration = recorder.currentTime
+                recorder.stop()
+                self.recorder = nil
+                if let bufferURL {
+                    try? FileManager.default.removeItem(at: bufferURL)
+                    self.bufferURL = nil
+                }
+                try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+                DayTapLog.recorder.info("armed buffer discarded duration=\(duration)")
+            }
+            return nil
+        }
         let duration = recorder.currentTime
         recorder.stop()
         self.recorder = nil

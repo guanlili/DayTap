@@ -23,6 +23,7 @@
 		B21000000000000000000004 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* Formatters.swift */; };
 		B21000000000000000000005 /* DayTapWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000001 /* DayTapWatchApp.swift */; };
 		B21000000000000000000006 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000002 /* WatchModel.swift */; };
+		B2100000000000000000000D /* StealthIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000008 /* StealthIntents.swift */; };
 		B21000000000000000000007 /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000003 /* AudioCapture.swift */; };
 		B21000000000000000000008 /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000004 /* WatchLink.swift */; };
 		B21000000000000000000009 /* RecordingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000005 /* RecordingScreen.swift */; };
@@ -69,6 +70,7 @@
 		F20000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F30000000000000000000001 /* DayTapWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTapWatchApp.swift; sourceTree = "<group>"; };
 		F30000000000000000000002 /* WatchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModel.swift; sourceTree = "<group>"; };
+		F30000000000000000000008 /* StealthIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StealthIntents.swift; sourceTree = "<group>"; };
 		F30000000000000000000003 /* AudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
 		F30000000000000000000004 /* WatchLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLink.swift; sourceTree = "<group>"; };
 		F30000000000000000000005 /* RecordingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingScreen.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 				F30000000000000000000003 /* AudioCapture.swift */,
 				F30000000000000000000004 /* WatchLink.swift */,
 				F30000000000000000000005 /* RecordingScreen.swift */,
+				F30000000000000000000008 /* StealthIntents.swift */,
 				F30000000000000000000006 /* Info.plist */,
 				F30000000000000000000007 /* Assets.xcassets */,
 			);
@@ -293,6 +296,7 @@
 				B21000000000000000000007 /* AudioCapture.swift in Sources */,
 				B21000000000000000000008 /* WatchLink.swift in Sources */,
 				B21000000000000000000009 /* RecordingScreen.swift in Sources */,
+				B2100000000000000000000D /* StealthIntents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

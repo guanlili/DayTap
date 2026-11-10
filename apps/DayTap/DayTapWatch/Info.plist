@@ -3,10 +3,16 @@
 <plist version="1.0">
 <dict>
 	<!--
-	    不设置 WKBackgroundModes / UIBackgroundModes。
-	    录音只在 DayTap 留在前台时进行。手腕放下导致 App 进入后台时，界面会停止并保存。
-	    不使用延长运行会话：现有会话类型对不上「上课录音」，不能为了续录去套一个不真实的类型。
+	    UIBackgroundModes=audio：录音会话活跃期间，App 退后台（按表冠回表盘、切走）继续录。
+	    这是 #5「无感录音」的前置：谈话中开录后不需要停留在这个 App。
+	    刻意不用延长运行会话（WKExtendedRuntimeSession 的类型对不上、滥用有审核风险）；
+	    本 App 为个人开发版，audio 后台模式 + 活跃 AVAudioSession 是官方文档与
+	    Just Press Record / Wave 等先例采用的标准做法。
 	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
