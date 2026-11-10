@@ -138,8 +138,9 @@ fi
 
 echo
 echo "[5] 本机结构性限制(装不出来,不是没装好)"
-info "无 iPhone / Apple Watch 连接 —— 真机录音、配对传输、触觉、握拳只能在有设备的主机上验"
-info "模拟器不支持 WatchConnectivity 配对 —— 传文件链路永远需要真机"
+info "模拟器可编译/可启动/可截图/可读日志;WCSession 在配对模拟器上能激活(reachability=true)"
+info "但模拟器无麦克风(录音起不来)、无可编程点按通道 —— 传输链路要么上 XCUITest,要么真机"
+info "真机专属:录音质量、VAD 阈值、触觉、后台保活、双击/握拳/Action Button、耗电发热"
 
 echo
 echo "结果:FAIL=$FAILS WARN=$WARNS"
