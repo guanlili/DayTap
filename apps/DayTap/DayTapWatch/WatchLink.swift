@@ -70,6 +70,7 @@ final class WatchLink: NSObject {
         }
 
         reconcileOrphans()
+        purgeAcknowledged()
 
         let outstanding = Set(session.outstandingFileTransfers.compactMap { transfer -> String? in
             transfer.file.metadata?[TransferKeys.id] as? String
@@ -125,9 +126,20 @@ final class WatchLink: NSObject {
         DayTapLog.link.info("transferFile queued \(record.id, privacy: .public) reachable=\(session.isReachable)")
     }
 
+    /// 确认即删(#21 方案A):iPhone 已确认落盘的原件与索引一并清掉,
+    /// 手表只当采集器,存储不随时间膨胀。旧版本只标记不删,这里顺带清历史积压。
+    /// 底线不动:没被确认的(awaiting ack/失败)绝不删。
+    private func purgeAcknowledged() {
+        let acked = library.snapshot().filter { $0.state == .acknowledged }
+        guard !acked.isEmpty else { return }
+        for record in acked {
+            library.remove(id: record.id)
+        }
+        DayTapLog.link.info("purged acknowledged count=\(acked.count, privacy: .public)")
+    }
+
     /// 崩溃或被系统杀掉时，目录里可能有 m4a 但索引没有。补一条待传记录。
-    private func reconcileOrphans() {
-        let folder = library.audioDirectory
+    private func reconcileOrphans() {        let folder = library.audioDirectory
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: folder,
             includingPropertiesForKeys: [.fileSizeKey, .creationDateKey]
@@ -251,7 +263,9 @@ extension WatchLink: WCSessionDelegate {
         DispatchQueue.main.async {
             self.clearSubmitted(id)
             self.library.update(id: id, state: .acknowledged, error: nil)
-            DayTapLog.link.info("phone acked \(id, privacy: .public)")
+            // 确认即删(#21 方案A):手机已落盘并回执,原件在手表上不再保留。
+            self.library.remove(id: id)
+            DayTapLog.link.info("phone acked \(id, privacy: .public); purged on watch")
             self.setStatus("iPhone 已保存")
         }
     }

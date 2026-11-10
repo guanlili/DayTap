@@ -85,7 +85,7 @@ struct RecordingListView: View {
             Button("删除", role: .destructive) { commitDelete() }
             Button("取消", role: .cancel) { deletingRecord = nil }
         } message: {
-            Text("手机上的音频与索引会一并删除，不可恢复。手表上的原件不受影响，也不会自动传回。")
+            Text("手机上的音频与索引会一并删除，不可恢复。")
         }
         .sheet(item: $transcriptRecord) { record in
             TranscriptView(
@@ -504,7 +504,11 @@ private struct GuideSheet: View {
         NavigationStack {
             List {
                 Section("分工") {
-                    guideRow(icon: "applewatch", title: "手表只负责录音，不连接得到。")
+                    guideRow(
+                        icon: "applewatch",
+                        title: "手表只负责录音，不连接得到。",
+                        detail: "录音传到 iPhone 确认保存后，手表上的原件会自动清除，不占手表空间。"
+                    )
                 }
 
                 Section("操作") {
