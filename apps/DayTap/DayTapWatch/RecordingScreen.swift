@@ -90,7 +90,14 @@ struct RecordingScreen: View {
     /// 第二行只在两种时候出现:传输卡住(用户能自己处理),或闲着需要一句提示。
     /// 正常录制中不占位,保持「就是块表盘」的观感。
     @ViewBuilder private var secondaryLine: some View {
-        if model.transfer.failed > 0 {
+        if model.phase == .idle, let armError = model.armError {
+            Text("武装失败·长按看")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+                .accessibilityIdentifier("daytap.arm.failed")
+                .accessibilityHint(armError)
+        } else if model.transfer.failed > 0 {
             Text("\(model.transfer.failed) 条没传出·长按看")
                 .font(.caption2)
                 .foregroundStyle(.orange)
@@ -159,6 +166,13 @@ struct RecordingScreen: View {
                 Text(model.status)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                if let armError = model.armError {
+                    Text("录音起不来:\(armError)")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(4)
+                }
 
                 Button("再传一次") { model.retry() }
                     .buttonStyle(.bordered)

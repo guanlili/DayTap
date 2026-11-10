@@ -37,6 +37,8 @@ final class WatchModel: ObservableObject {
     @Published private(set) var transfer = TransferSummary()
     /// 用户主动「解除无感」后保持关闭,不要下一次进前台又自己武装回去。
     @Published private(set) var stealthSuppressed = false
+    /// 武装失败的原因。界面必须能让本人看到——静默是「对旁人不显眼」,不是「自己也看不见」。
+    @Published private(set) var armError: String?
     @Published private(set) var permissionDenied = false
 
     var isRecording: Bool { phase == .recording }
@@ -177,12 +179,15 @@ final class WatchModel: ObservableObject {
                 try self.capture.startBuffer()
             } catch {
                 self.status = error.localizedDescription
+                self.armError = error.localizedDescription
                 DayTapLog.recorder.error("arm failed \(error.localizedDescription, privacy: .public)")
+                WKInterfaceDevice.current().play(.failure)
                 return
             }
             self.armedAt = Date()
             self.voiceSince = nil
             self.phase = .armed
+            self.armError = nil
             self.status = "已武装·听到说话自动录"
             self.startTimer()
         }
