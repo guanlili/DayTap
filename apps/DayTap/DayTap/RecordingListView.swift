@@ -26,6 +26,11 @@ struct RecordingListView: View {
     @State private var transcriptRecord: RecordingRecord?
     @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
+    // 批量管理(#25):编辑态、选中集、批量分享/删除。
+    @State private var isEditing = false
+    @State private var selectedIDs: Set<String> = []
+    @State private var batchShareURLs: [URL]?
+    @State private var confirmBatchDelete = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +43,15 @@ struct RecordingListView: View {
             }
             .navigationTitle("DayTap")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !library.records.isEmpty, !recorder.isRecording {
+                        Button(isEditing ? "完成" : "编辑") {
+                            isEditing.toggle()
+                            if !isEditing { selectedIDs.removeAll() }
+                        }
+                        .accessibilityIdentifier("daytap.edit")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showGuide = true
@@ -48,7 +62,11 @@ struct RecordingListView: View {
                     .accessibilityIdentifier("daytap.guide")
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    recordControl
+                    if isEditing {
+                        batchBar
+                    } else {
+                        recordControl
+                    }
                 }
             }
         }
@@ -105,6 +123,23 @@ struct RecordingListView: View {
         .sheet(item: $shareRecord) { record in
             ActivityShareSheet(url: library.fileURL(id: record.id))
                 .ignoresSafeArea()
+        }
+        .sheet(isPresented: Binding(
+            get: { !(batchShareURLs ?? []).isEmpty },
+            set: { if !$0 { batchShareURLs = nil } }
+        )) {
+            ActivityShareSheet(urls: batchShareURLs ?? [])
+                .ignoresSafeArea()
+        }
+        .confirmationDialog(
+            "删除选中的 \(selectedIDs.count) 条？",
+            isPresented: $confirmBatchDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) { commitBatchDelete() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("手机上的音频与索引会一并删除，不可恢复。")
         }
         .sheet(isPresented: $showGuide) {
             GuideSheet()
@@ -219,6 +254,66 @@ struct RecordingListView: View {
         }
     }
 
+    /// 编辑态底栏(#25):全选 / 分享(n) / 删除(n),替代录音钮(录着时禁进编辑)。
+    private var batchBar: some View {
+        let count = selectedIDs.count
+        let allSelected = !library.records.isEmpty && count == library.records.count
+        return HStack {
+            Button(allSelected ? "全不选" : "全选") {
+                selectedIDs = allSelected ? [] : Set(library.records.map(\.id))
+            }
+            Spacer()
+            Button {
+                shareSelected()
+            } label: {
+                Label("分享 (\(count))", systemImage: "square.and.arrow.up")
+            }
+            .disabled(count == 0)
+            Spacer()
+            Button(role: .destructive) {
+                confirmBatchDelete = true
+            } label: {
+                Label("删除 (\(count))", systemImage: "trash")
+            }
+            .disabled(count == 0)
+        }
+    }
+
+    private func toggleSelect(_ id: String) {
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    private func shareSelected() {
+        let urls = selectedIDs.compactMap { id -> URL? in
+            let url = library.fileURL(id: id)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        guard !urls.isEmpty else {
+            banner = "选中的录音找不到音频文件"
+            return
+        }
+        batchShareURLs = urls
+    }
+
+    /// 批量落删(#25):正在播的在集内先停播,逐条走 forget(索引+文件+防复活名单)。
+    private func commitBatchDelete() {
+        let ids = selectedIDs
+        selectedIDs.removeAll()
+        if let playing = player.playingID, ids.contains(playing) {
+            player.reset()
+        }
+        for id in ids {
+            link.forget(id: id)
+        }
+        if library.records.filter { !ids.contains($0.id) }.isEmpty {
+            isEditing = false
+        }
+    }
+
     /// 底栏录音钮(#3):闲时红色大麦克风;录时红点+计时+音量条+停止键。语音备忘录的语言。
     @ViewBuilder
     private var recordControl: some View {
@@ -293,14 +388,68 @@ struct RecordingListView: View {
         .accessibilityIdentifier("daytap.banner")
     }
 
-    /// #19 极简行:标题+副标题+一个播放键,整行轻点=试听;
-    /// 其余动作全在长按菜单,轻扫给快捷(左滑转文字/全文,右滑分享)。
+    /// #19 极简行 / #25 编辑态:平时=标题+副标题+播放键,整行轻点试听;
+    /// 编辑态=左端勾选圈,整行轻点切换选中,播放键与轻扫隐藏。
+    @ViewBuilder
     private func row(_ record: RecordingRecord) -> some View {
+        if isEditing {
+            rowBody(record)
+                .contentShape(Rectangle())
+                .onTapGesture { toggleSelect(record.id) }
+        } else {
+            rowBody(record)
+                .contentShape(Rectangle())
+                .onTapGesture { togglePlay(record, fileExists: FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)) }
+                .contextMenu { rowMenu(record) }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        shareRecord = record
+                    } label: {
+                        Label("分享", systemImage: "square.and.arrow.up")
+                    }
+                    .tint(.accentColor)
+                    .disabled(!FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path))
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        deletingRecord = record
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+
+                    if record.transcript != nil {
+                        Button {
+                            transcriptRecord = record
+                        } label: {
+                            Label("全文", systemImage: "text.quote")
+                        }
+                        .tint(.accentColor)
+                    } else if FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path) {
+                        Button {
+                            transcriber.transcribe(record)
+                        } label: {
+                            Label("转文字", systemImage: "text.bubble")
+                        }
+                        .tint(.accentColor)
+                        .disabled(transcriber.activeID != nil)
+                    }
+                }
+        }
+    }
+
+    private func rowBody(_ record: RecordingRecord) -> some View {
         let fileExists = FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
         let active = player.playingID == record.id
         let playing = active && player.isPlaying
 
         return HStack(alignment: .center, spacing: 12) {
+            if isEditing {
+                Image(systemName: selectedIDs.contains(record.id) ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selectedIDs.contains(record.id) ? Color.accentColor : Color.secondary)
+                    .accessibilityHidden(true)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(record.title)
                     .font(.body.weight(.semibold))
@@ -316,106 +465,85 @@ struct RecordingListView: View {
 
             Spacer(minLength: 8)
 
-            Button {
-                togglePlay(record, fileExists: fileExists)
-            } label: {
-                Image(systemName: playing ? "pause.fill" : "play.fill")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(active ? Color.white : Color.accentColor)
-                    .frame(width: 34, height: 34)
-                    .background(
-                        Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
-                    )
+            if !isEditing {
+                Button {
+                    togglePlay(record, fileExists: fileExists)
+                } label: {
+                    Image(systemName: playing ? "pause.fill" : "play.fill")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(active ? Color.white : Color.accentColor)
+                        .frame(width: 34, height: 34)
+                        .background(
+                            Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
+                        )
+                }
+                .disabled(!fileExists)
+                .buttonStyle(.borderless)
+                .accessibilityLabel(playing ? "暂停" : "试听")
+                .accessibilityIdentifier("daytap.play.\(record.id)")
             }
-            .disabled(!fileExists)
-            .buttonStyle(.borderless)
-            .accessibilityLabel(playing ? "暂停" : "试听")
-            .accessibilityIdentifier("daytap.play.\(record.id)")
         }
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { togglePlay(record, fileExists: fileExists) }
-        .contextMenu {
-            if record.transcript != nil {
-                Button {
-                    transcriptRecord = record
-                } label: {
-                    Label("查看全文", systemImage: "text.quote")
-                }
-                .accessibilityIdentifier("daytap.transcript.\(record.id)")
-            } else if fileExists {
-                Button {
-                    transcriber.transcribe(record)
-                } label: {
-                    Label("转文字", systemImage: "text.bubble")
-                }
-                .disabled(transcriber.activeID != nil)
-                .accessibilityIdentifier("daytap.transcribe.\(record.id)")
-            }
-
-            Button {
-                shareRecord = record
-            } label: {
-                Label("分享", systemImage: "square.and.arrow.up")
-            }
-            .disabled(!fileExists)
-            .accessibilityIdentifier("daytap.share.\(record.id)")
-
-            Button {
-                prepareExport(record)
-            } label: {
-                Label("存到文件", systemImage: "folder")
-            }
-            .disabled(!fileExists)
-
-            Button {
-                newName = record.displayName ?? ""
-                renamingRecord = record
-            } label: {
-                Label("重命名", systemImage: "pencil")
-            }
-
-            Button(role: .destructive) {
-                deletingRecord = record
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button {
-                shareRecord = record
-            } label: {
-                Label("分享", systemImage: "square.and.arrow.up")
-            }
-            .tint(.accentColor)
-            .disabled(!fileExists)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                deletingRecord = record
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-
-            if record.transcript != nil {
-                Button {
-                    transcriptRecord = record
-                } label: {
-                    Label("全文", systemImage: "text.quote")
-                }
-                .tint(.accentColor)
-            } else if fileExists {
-                Button {
-                    transcriber.transcribe(record)
-                } label: {
-                    Label("转文字", systemImage: "text.bubble")
-                }
-                .tint(.accentColor)
-                .disabled(transcriber.activeID != nil)
-            }
-        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("daytap.recording.\(record.id)")
+    }
+
+    /// 长按菜单(#19 系动作 + #25 「选择」进入编辑态)。
+    @ViewBuilder
+    private func rowMenu(_ record: RecordingRecord) -> some View {
+        let fileExists = FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
+
+        Button {
+            isEditing = true
+            selectedIDs.insert(record.id)
+        } label: {
+            Label("选择", systemImage: "checkmark.circle")
+        }
+
+        if record.transcript != nil {
+            Button {
+                transcriptRecord = record
+            } label: {
+                Label("查看全文", systemImage: "text.quote")
+            }
+            .accessibilityIdentifier("daytap.transcript.\(record.id)")
+        } else if fileExists {
+            Button {
+                transcriber.transcribe(record)
+            } label: {
+                Label("转文字", systemImage: "text.bubble")
+            }
+            .disabled(transcriber.activeID != nil)
+            .accessibilityIdentifier("daytap.transcribe.\(record.id)")
+        }
+
+        Button {
+            shareRecord = record
+        } label: {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+        .disabled(!fileExists)
+        .accessibilityIdentifier("daytap.share.\(record.id)")
+
+        Button {
+            prepareExport(record)
+        } label: {
+            Label("存到文件", systemImage: "folder")
+        }
+        .disabled(!fileExists)
+
+        Button {
+            newName = record.displayName ?? ""
+            renamingRecord = record
+        } label: {
+            Label("重命名", systemImage: "pencil")
+        }
+
+        Button(role: .destructive) {
+            deletingRecord = record
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
     }
 
     /// 整行与播放键共用一份启停逻辑,文件不在就提示。
@@ -577,7 +705,12 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "hand.tap",
                         title: "轻点 · 长按 · 轻扫",
-                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名 / 删除；左滑出「转文字」「全文」或「删除」，右滑出「分享」。"
+                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名 / 删除 / 选择；左滑出「转文字」「全文」或「删除」，右滑出「分享」。"
+                    )
+                    guideRow(
+                        icon: "checkmark.circle",
+                        title: "批量管理",
+                        detail: "右上角「编辑」或长按里的「选择」进入多选，可批量分享（一次交给得到 / 文件 / 隔空投送）或批量删除。"
                     )
                 }
 
