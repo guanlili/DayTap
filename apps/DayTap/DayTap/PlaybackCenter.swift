@@ -10,11 +10,15 @@ final class PlaybackCenter: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    /// 倍速(#26):点击循环 1x→1.5x→2x,同一播放会话内跨条保留。
+    @Published private(set) var rate: Float = 1.0
     /// 最近一次「点试听却打不开」的原因,给列表页提示。成功播放或 reset 时清空。
     @Published private(set) var loadError: String?
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
+
+    private static let rateOrder: [Float] = [1.0, 1.5, 2.0]
 
     /// 同一条:播着就暂停,暂停了就续播;换一条:从头播。
     func toggle(_ record: RecordingRecord, fileURL: URL) {
@@ -47,6 +51,8 @@ final class PlaybackCenter: ObservableObject {
             return
         }
         loadError = nil
+        newPlayer.enableRate = true
+        newPlayer.rate = rate
         newPlayer.play()
         player = newPlayer
         playingID = record.id
@@ -55,6 +61,26 @@ final class PlaybackCenter: ObservableObject {
         elapsed = 0
         progress = 0
         startTimer()
+    }
+
+    /// 倍速循环(#26):1x→1.5x→2x→1x,正在播的条目即时生效。
+    func cycleRate() {
+        guard let index = Self.rateOrder.firstIndex(of: rate) else {
+            rate = 1.0
+            return
+        }
+        rate = Self.rateOrder[(index + 1) % Self.rateOrder.count]
+        player?.rate = rate
+    }
+
+    /// 拖动定位(#26):进度比例 0...1 落到播放器,拖动中 currentTime 实时跟手;
+    /// 顶到末端留 0.1s 余量,避免拖到头触发「播完自动复位」。
+    func scrub(to fraction: Double) {
+        guard let player, playingID != nil, duration > 0 else { return }
+        let clamped = min(max(fraction, 0), 0.995)
+        player.currentTime = clamped * duration
+        elapsed = player.currentTime
+        progress = clamped
     }
 
     /// 停止并复位。播完自动调用;列表刷新、切条、离开页面也由外部调用。

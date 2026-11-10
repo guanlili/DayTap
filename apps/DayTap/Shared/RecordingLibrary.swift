@@ -94,6 +94,42 @@ final class RecordingLibrary: ObservableObject {
         DayTapLog.library.info("removed \(id, privacy: .public)")
     }
 
+    /// 软删进回收站(#26):只打 deletedAt 标记,文件留在原地,列表按非 nil 过滤。
+    func softDelete(id: String) {
+        mutate { records in
+            if let index = records.firstIndex(where: { $0.id == id }) {
+                records[index].deletedAt = Date()
+            }
+        }
+        DayTapLog.library.info("soft deleted \(id, privacy: .public)")
+    }
+
+    /// 从回收站恢复(#26):清掉 deletedAt,条目回到列表。
+    func restore(id: String) {
+        mutate { records in
+            if let index = records.firstIndex(where: { $0.id == id }) {
+                records[index].deletedAt = nil
+            }
+        }
+    }
+
+    /// 回收站到期清扫(#26):软删超过保留期的连文件一起真正删掉。返回清除条数。
+    @discardableResult
+    func purgeExpiredDeleted(retention: TimeInterval) -> Int {
+        let cutoff = Date().addingTimeInterval(-retention)
+        let expired = snapshot().filter { record in
+            guard let deletedAt = record.deletedAt else { return false }
+            return deletedAt < cutoff
+        }
+        for record in expired {
+            remove(id: record.id)
+        }
+        if !expired.isEmpty {
+            DayTapLog.library.info("purged expired trashed count=\(expired.count, privacy: .public)")
+        }
+        return expired.count
+    }
+
     func snapshot() -> [RecordingRecord] {
         lock.lock()
         defer { lock.unlock() }

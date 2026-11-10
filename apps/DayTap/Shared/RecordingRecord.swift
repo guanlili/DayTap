@@ -33,6 +33,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 录音来源(#3):nil=手表(旧数据天然如此),"phone"=手机直接录。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机录的永远不出本机)。
     var origin: String? = nil
+    /// 手机端软删时间(#26):nil=正常;非 nil=在「最近删除」里,30 天后自动彻底清除。
+    /// 可选字段,默认 nil 向后兼容;不参与手表传输协议。
+    var deletedAt: Date? = nil
 
     /// 列表标题:起了名用名字,没起名用时间。
     var title: String {

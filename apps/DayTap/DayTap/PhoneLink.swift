@@ -27,9 +27,11 @@ final class PhoneLink: NSObject, ObservableObject {
             indexURL: DayTapFolders.appSupport.appendingPathComponent("index.json")
         )
         super.init()
+        // 回收站到期清扫(#26):30 天前的软删条目连文件一起真正清掉。
+        library.purgeExpiredDeleted(retention: 30 * 24 * 3600)
     }
 
-    /// 手机端删除入口(#20):索引+音频清掉,并记入防复活名单。
+    /// 手机端删除入口(#20→#26):先记防复活名单,再软删进「最近删除」(30 天可恢复)。
     func forget(id: String) {
         var ids = UserDefaults.standard.stringArray(forKey: Self.deletedIDsKey) ?? []
         if !ids.contains(id) {
@@ -39,6 +41,11 @@ final class PhoneLink: NSObject, ObservableObject {
             }
             UserDefaults.standard.set(ids, forKey: Self.deletedIDsKey)
         }
+        library.softDelete(id: id)
+    }
+
+    /// 彻底删除(#26):回收站里手动清掉,索引+文件一并删(防复活名单在 forget 时已记)。
+    func purgeNow(id: String) {
         library.remove(id: id)
     }
 

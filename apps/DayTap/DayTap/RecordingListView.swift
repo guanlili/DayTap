@@ -31,11 +31,31 @@ struct RecordingListView: View {
     @State private var selectedIDs: Set<String> = []
     @State private var batchShareURLs: [URL]?
     @State private var confirmBatchDelete = false
+    // 搜索(#26):标题+全文。
+    @State private var query = ""
+
+    /// 正常在列的(不含回收站);搜索时再按 标题/全文 过滤。
+    private var activeRecords: [RecordingRecord] {
+        library.records.filter { $0.deletedAt == nil }
+    }
+
+    private var trashedRecords: [RecordingRecord] {
+        library.records.filter { $0.deletedAt != nil }
+    }
+
+    private var visibleRecords: [RecordingRecord] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return activeRecords }
+        return activeRecords.filter { record in
+            record.title.localizedCaseInsensitiveContains(keyword)
+                || (record.transcript?.localizedCaseInsensitiveContains(keyword) ?? false)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if library.records.isEmpty {
+                if activeRecords.isEmpty && query.isEmpty {
                     emptyState
                 } else {
                     list
@@ -44,7 +64,7 @@ struct RecordingListView: View {
             .navigationTitle("DayTap")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !library.records.isEmpty, !recorder.isRecording {
+                    if !activeRecords.isEmpty, !recorder.isRecording {
                         Button(isEditing ? "完成" : "编辑") {
                             isEditing.toggle()
                             if !isEditing { selectedIDs.removeAll() }
@@ -247,20 +267,40 @@ struct RecordingListView: View {
             }
 
             Section {
-                ForEach(library.records) { record in
-                    row(record)
+                if visibleRecords.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    ForEach(visibleRecords) { record in
+                        row(record)
+                    }
+                }
+            }
+
+            // 回收站有货才出现(#26):与「出问题才说话」同一口径。
+            if !trashedRecords.isEmpty {
+                Section {
+                    NavigationLink {
+                        TrashView(library: library)
+                    } label: {
+                        Label("最近删除 · \(trashedRecords.count) 条", systemImage: "trash")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("daytap.trash")
                 }
             }
         }
+        .searchable(text: $query, prompt: "搜索录音或全文")
     }
 
     /// 编辑态底栏(#25):全选 / 分享(n) / 删除(n),替代录音钮(录着时禁进编辑)。
+    /// 全选作用于当前可见集(搜索结果),同邮件口径。
     private var batchBar: some View {
         let count = selectedIDs.count
-        let allSelected = !library.records.isEmpty && count == library.records.count
+        let allSelected = !visibleRecords.isEmpty && count == visibleRecords.count
         return HStack {
             Button(allSelected ? "全不选" : "全选") {
-                selectedIDs = allSelected ? [] : Set(library.records.map(\.id))
+                selectedIDs = allSelected ? [] : Set(visibleRecords.map(\.id))
             }
             Spacer()
             Button {
@@ -299,7 +339,7 @@ struct RecordingListView: View {
         batchShareURLs = urls
     }
 
-    /// 批量落删(#25):正在播的在集内先停播,逐条走 forget(索引+文件+防复活名单)。
+    /// 批量落删(#25→#26 软删):正在播的在集内先停播,逐条进回收站。
     private func commitBatchDelete() {
         let ids = selectedIDs
         selectedIDs.removeAll()
@@ -309,9 +349,27 @@ struct RecordingListView: View {
         for id in ids {
             link.forget(id: id)
         }
-        if library.records.filter { !ids.contains($0.id) }.isEmpty {
+        if activeRecords.allSatisfy({ ids.contains($0.id) }) {
             isEditing = false
         }
+    }
+
+    /// 全文命中上下文(#26):标题没命中但全文命中时,取关键词前后一小段做预览。
+    private func transcriptSnippet(_ record: RecordingRecord) -> String? {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty,
+              let transcript = record.transcript,
+              !record.title.localizedCaseInsensitiveContains(keyword),
+              let range = transcript.range(of: keyword, options: [.caseInsensitive, .diacriticInsensitive])
+        else { return nil }
+        let window = 12
+        let start = transcript.index(range.lowerBound, offsetBy: -window, limitedBy: transcript.startIndex)
+            ?? transcript.startIndex
+        let end = transcript.index(range.upperBound, offsetBy: window, limitedBy: transcript.endIndex)
+            ?? transcript.endIndex
+        let head = start > transcript.startIndex ? "…" : ""
+        let tail = end < transcript.endIndex ? "…" : ""
+        return "全文 \(head)\(transcript[start..<end])\(tail)"
     }
 
     /// 底栏录音钮(#3):闲时红色大麦克风;录时红点+计时+音量条+停止键。语音备忘录的语言。
@@ -458,6 +516,13 @@ struct RecordingListView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                if let snippet = transcriptSnippet(record) {
+                    Text(snippet)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 if active {
                     playbackBar(record)
                 }
@@ -565,21 +630,41 @@ struct RecordingListView: View {
         link.forget(id: target.id)
     }
 
-    /// 试听进度:一行时间 + 细进度条。只占播放中那一行,红进度与行首同色。
+    /// 试听进度(#26):时间行(中间倍速钮)+可拖动定位的红 slider。
     private func playbackBar(_ record: RecordingRecord) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             HStack {
                 Text(DayTapFormat.clock(player.elapsed))
+                Spacer()
+                Button {
+                    player.cycleRate()
+                } label: {
+                    Text(speedLabel)
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("播放速度\(speedLabel)")
                 Spacer()
                 Text(DayTapFormat.clock(max(player.duration, record.durationSeconds)))
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
 
-            ProgressView(value: player.progress)
-                .tint(.red)
+            Slider(value: Binding(
+                get: { player.progress },
+                set: { player.scrub(to: $0) }
+            ), in: 0...1)
+            .tint(.red)
         }
         .accessibilityIdentifier("daytap.playback.\(record.id)")
+    }
+
+    private var speedLabel: String {
+        player.rate == 1.5 ? "1.5x" : (player.rate == 2.0 ? "2x" : "1x")
     }
 
     private func subtitle(for record: RecordingRecord) -> String {
@@ -686,6 +771,82 @@ private struct TranscriptView: View {
     }
 }
 
+/// 最近删除(#26):删除先进这里,30 天保留期内可恢复;到期 PhoneLink 启动时自动彻底清除。
+private struct TrashView: View {
+    @ObservedObject var library: RecordingLibrary
+    @State private var confirmPurgeAll = false
+
+    private var trashed: [RecordingRecord] {
+        library.records.filter { $0.deletedAt != nil }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(trashed) { record in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(record.title)
+                            .font(.body.weight(.semibold))
+                            .lineLimit(2)
+                        Text("删除于 \(record.deletedAt?.formatted(date: .abbreviated, time: .shortened) ?? "") · 剩 \(daysLeft(record)) 天")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button {
+                            library.restore(id: record.id)
+                        } label: {
+                            Label("恢复", systemImage: "arrow.uturn.backward")
+                        }
+                        .tint(.accentColor)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            PhoneLink.shared.purgeNow(id: record.id)
+                        } label: {
+                            Label("彻底删除", systemImage: "trash")
+                        }
+                    }
+                }
+            } footer: {
+                Text("删除的录音保留 30 天，到期自动清除；恢复后回到列表。")
+            }
+        }
+        .navigationTitle("最近删除")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !trashed.isEmpty {
+                    Button("清空", role: .destructive) {
+                        confirmPurgeAll = true
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "清空最近删除？",
+            isPresented: $confirmPurgeAll,
+            titleVisibility: .visible
+        ) {
+            Button("清空", role: .destructive) {
+                for record in trashed {
+                    PhoneLink.shared.purgeNow(id: record.id)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将彻底删除 \(trashed.count) 条，不可恢复。")
+        }
+    }
+
+    private func daysLeft(_ record: RecordingRecord) -> Int {
+        guard let deletedAt = record.deletedAt else { return 30 }
+        let days = Int(Date().timeIntervalSince(deletedAt) / 86_400)
+        return max(0, 30 - days)
+    }
+}
+
 /// 使用指南(#15):原首屏文字墙收纳于此,内容一字不丢,只换排版。
 private struct GuideSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -711,6 +872,11 @@ private struct GuideSheet: View {
                         icon: "checkmark.circle",
                         title: "批量管理",
                         detail: "右上角「编辑」或长按里的「选择」进入多选，可批量分享（一次交给得到 / 文件 / 隔空投送）或批量删除。"
+                    )
+                    guideRow(
+                        icon: "slider.horizontal.3",
+                        title: "回听与搜索",
+                        detail: "播放中进度条可拖动定位，点「1x」循环倍速（1.5x / 2x）；列表顶部可搜标题与转写全文；删除的录音进「最近删除」保留 30 天，可恢复。"
                     )
                 }
 
