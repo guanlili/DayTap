@@ -33,9 +33,16 @@ final class WatchModel: ObservableObject {
     @Published var status = "抬腕即武装,有人说话自动录"
     /// 传输通道的一句话状态(待传/送出/已确认),无感界面在闲时小字展示。
     @Published private(set) var linkStatus = ""
+    /// 结构化传输计数(#4):界面据此决定提示强度,不再只能读一句话。
+    @Published private(set) var transfer = TransferSummary()
+    /// 用户主动「解除无感」后保持关闭,不要下一次进前台又自己武装回去。
+    @Published private(set) var stealthSuppressed = false
     @Published private(set) var permissionDenied = false
 
     var isRecording: Bool { phase == .recording }
+
+    /// 界面上只有「有东西卡住」才值得占用视线。
+    var needsAttention: Bool { transfer.needsAttention }
 
     private let capture = AudioCapture()
     private let link = WatchLink.shared
@@ -48,9 +55,12 @@ final class WatchModel: ObservableObject {
 
     private init() {
         link.onChange = { [weak self] in
-            self?.linkStatus = self?.link.statusText ?? ""
+            guard let self else { return }
+            self.linkStatus = self.link.statusText
+            self.transfer = self.link.summary
         }
         linkStatus = link.statusText
+        transfer = link.summary
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
@@ -73,7 +83,7 @@ final class WatchModel: ObservableObject {
             status = "需要麦克风权限"
         case .granted:
             permissionDenied = false
-            armIfIdle()
+            armIfAllowed()
         case .undetermined:
             permissionDenied = false
         @unknown default:
@@ -82,14 +92,14 @@ final class WatchModel: ObservableObject {
         link.activate()
     }
 
-    /// 回到前台:补传没送完的文件;状态对不上的收尾;闲着就重新武装。
+    /// 回到前台:补传没送完的文件;状态对不上的收尾;没被用户关掉就重新武装。
     func onActive() {
         link.retryPending(reason: "foreground")
         if phase == .recording, !capture.isRecording {
             // 系统把录音停掉了,但状态还停在录。把已有内容送出去。
             finish(reason: "录音被系统停下,已保存并排队")
         } else if phase == .idle, capture.permissionState() == .granted {
-            armIfIdle()
+            armIfAllowed()
         }
     }
 
@@ -98,6 +108,8 @@ final class WatchModel: ObservableObject {
     func toggle() {
         switch phase {
         case .idle:
+            // 手动点一下等同于用户重新要它开,解掉「已解除」的抑制。
+            stealthSuppressed = false
             armIfIdle()
         case .armed:
             commit()
@@ -107,24 +119,55 @@ final class WatchModel: ObservableObject {
     }
 
     /// 再交一次还没被 iPhone 确认的文件。不重新开麦。
+    /// #4:点一下必须有结果——有就重排、没有就明说「都到 iPhone 了」、失败就给原因。
     func retry() {
         link.activate()
         link.retryPending(reason: "manual")
-    }
-
-    /// AppIntent 专用:想安静退出时,录音中的照常保存,武装中的直接解除不保存。
-    func disarmFromIntent() {
-        switch phase {
-        case .recording:
-            finish(reason: nil)
-        case .armed:
-            disarm(reason: "已解除无感模式")
-        case .idle:
-            break
+        let summary = link.summary
+        if summary.failed > 0 {
+            let reason = summary.lastError ?? "原因未记录"
+            status = "还有 \(summary.failed) 条没传出：\(reason)"
+            WKInterfaceDevice.current().play(.failure)
+        } else if summary.waiting > 0 {
+            status = "已重新排队 \(summary.waiting) 条，等 iPhone 确认"
+            WKInterfaceDevice.current().play(.click)
+        } else if summary.acknowledged > 0 {
+            status = "没有要重传的，\(summary.acknowledged) 条都已在 iPhone 上"
+            WKInterfaceDevice.current().play(.click)
+        } else {
+            status = "还没有录过音，没有要传的"
+            WKInterfaceDevice.current().play(.click)
         }
     }
 
+    /// 主动退出无感模式,并保持关闭,不在下次进前台时自己武装回去。
+    func exitStealth() {
+        stealthSuppressed = true
+        switch phase {
+        case .recording:
+            finish(reason: "已停止并保存", rearm: false)
+        case .armed:
+            disarm(reason: "无感模式已关闭,点一下重新进入")
+        case .idle:
+            status = "无感模式已关闭,点一下重新进入"
+        }
+    }
+
+    /// AppIntent 专用入口:想安静退出时,录音中的照常保存,武装中的直接解除不保存。
+    func disarmFromIntent() {
+        exitStealth()
+    }
+
     // MARK: - 武装
+
+    /// 只在这三种情况下自动武装:进入前台、回到前台、一段录完。用户主动关掉时不再打扰。
+    private func armIfAllowed() {
+        guard !stealthSuppressed else {
+            status = "无感模式已关闭,点一下重新进入"
+            return
+        }
+        armIfIdle()
+    }
 
     private func armIfIdle() {
         guard phase == .idle else { return }
@@ -196,8 +239,9 @@ final class WatchModel: ObservableObject {
         DayTapLog.recorder.info("stealth commit \(id, privacy: .public)")
     }
 
-    /// 停止、入库、排队传 iPhone。收尾后立刻重新武装,支持一场会里连续多段录音。
-    private func finish(reason: String?) {
+    /// 停止、入库、排队传 iPhone。收尾后默认立刻重新武装,支持一场会里连续多段录音。
+    /// `rearm: false` 用于「用户主动退出」,既不武装也不留下新的缓冲。
+    private func finish(reason: String?, rearm: Bool = true) {
         let duration = capture.stop() ?? elapsed
         stopTimer()
         let id = recordingID
@@ -210,7 +254,7 @@ final class WatchModel: ObservableObject {
 
         guard let id, let startedAt else {
             status = "没有可发送的录音"
-            armIfIdle()
+            if rearm { armIfAllowed() }
             return
         }
         let url = link.library.fileURL(id: id)
@@ -219,7 +263,7 @@ final class WatchModel: ObservableObject {
             try? FileManager.default.removeItem(at: url)
             status = "录音是空的,没有发送"
             DayTapLog.recorder.error("empty recording \(id, privacy: .public)")
-            armIfIdle()
+            if rearm { armIfAllowed() }
             return
         }
         let record = RecordingRecord(
@@ -234,7 +278,7 @@ final class WatchModel: ObservableObject {
         link.library.upsert(record)
         link.enqueue(id: id)
         status = reason ?? "已保存,正在传给 iPhone"
-        armIfIdle()
+        if rearm { armIfAllowed() }
     }
 
     // MARK: - 心跳

@@ -1,6 +1,30 @@
 import Foundation
 import WatchConnectivity
 
+/// 传输账本的结构化视图（#4）。
+/// 之前界面只能看到 `statusText` 一行字，于是「点了没反应」「没有待传」都无法区分。
+/// 现在把计数摊开：界面能判断要不要提示，也能把失败原因交给用户。
+struct TransferSummary: Equatable {
+    /// 还没被 iPhone 确认的条数（待传/排队中/已送出）。
+    var waiting = 0
+    /// 其中已交给系统队列的数量。
+    var queued = 0
+    /// 其中系统报告送出完成、还在等回执的数量。
+    var delivered = 0
+    /// 确认失败、等下次重试的数量。
+    var failed = 0
+    /// iPhone 已确认落盘的数量。
+    var acknowledged = 0
+    /// 最近一条失败原因。
+    var lastError: String?
+    /// 最近一次被 iPhone 确认的时间。
+    var lastAckedAt: Date?
+
+    var total: Int { waiting + failed + acknowledged }
+    /// 只有「有东西卡住」才值得占用无感界面的视线。
+    var needsAttention: Bool { failed > 0 || waiting > 0 }
+}
+
 /// 手表 → iPhone 的文件桥。
 /// `transferFile` 会把文件放进系统队列：当时手机不在身边也会排队，靠近后再送。
 /// 这是 Apple 公开的配套 App 传文件方式（见 WWDC21《There and back again》）。模拟器传不成，要真机配对。
@@ -12,6 +36,9 @@ final class WatchLink: NSObject {
 
     /// 界面可读的一行状态。只在主线程改。
     private(set) var statusText = "结束后会传给 iPhone"
+
+    /// 结构化传输计数。界面据此决定「要不要显眼提示」，而不是去解析上面那句话（#4）。
+    private(set) var summary = TransferSummary()
 
     var onChange: (() -> Void)?
 
@@ -132,24 +159,68 @@ final class WatchLink: NSObject {
 
     private func refreshSummary(reachable: Bool, reason: String) {
         let records = library.snapshot()
-        let waiting = records.filter(\.awaitsPhoneAck).count
-        let failed = records.filter { $0.state == .failed }.count
+        var counts = TransferSummary()
+        var newestError: (date: Date, text: String)?
+        for record in records {
+            switch record.state {
+            case .pending, .queued:
+                counts.waiting += 1
+                if record.state == .queued { counts.queued += 1 }
+            case .delivered:
+                counts.waiting += 1
+                counts.delivered += 1
+            case .failed:
+                counts.failed += 1
+            case .acknowledged:
+                counts.acknowledged += 1
+                if let date = counts.lastAckedAt {
+                    counts.lastAckedAt = max(date, record.updatedAt)
+                } else {
+                    counts.lastAckedAt = record.updatedAt
+                }
+            }
+            if let error = record.lastError, error.isEmpty == false {
+                if let current = newestError {
+                    if record.updatedAt > current.date {
+                        newestError = (record.updatedAt, error)
+                    }
+                } else {
+                    newestError = (record.updatedAt, error)
+                }
+            }
+        }
+        counts.lastError = newestError?.text
+
         let line: String
-        if failed > 0 {
-            line = "有 \(failed) 条没传出。靠近 iPhone 后会重试。"
-        } else if waiting > 0 {
+        if counts.failed > 0 {
+            line = "有 \(counts.failed) 条没传出。靠近 iPhone 后会重试。"
+        } else if counts.waiting > 0 {
             if reachable {
-                line = "正在传给 iPhone（\(waiting) 条）"
+                line = "正在传给 iPhone（\(counts.waiting) 条）"
             } else {
-                line = "iPhone 不在身边也没关系，已排队 \(waiting) 条"
+                line = "iPhone 不在身边也没关系，已排队 \(counts.waiting) 条"
             }
         } else if records.isEmpty {
             line = "结束后音频传到配对的 iPhone"
         } else {
             line = "iPhone 已保存最近一条"
         }
-        DayTapLog.link.debug("summary \(reason, privacy: .public)")
+        DayTapLog.link.debug("summary \(reason, privacy: .public) waiting=\(counts.waiting) failed=\(counts.failed)")
+        applySummary(counts)
         setStatus(line)
+    }
+
+    /// 计数与文案必须同时到界面，否则会出现「数字变了、提示没变」的错位。
+    private func applySummary(_ counts: TransferSummary) {
+        let apply = {
+            self.summary = counts
+            self.onChange?()
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
     }
 
     private func setStatus(_ text: String) {
@@ -209,6 +280,7 @@ extension WatchLink: WCSessionDelegate {
                 self.library.update(id: id, state: .failed, error: error.localizedDescription)
                 DayTapLog.link.error("transfer failed \(id, privacy: .public) \(error.localizedDescription, privacy: .public)")
                 self.setStatus("传输失败，稍后自动重试")
+                self.refreshSummary(reachable: session.isReachable, reason: "transfer-failed")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                     self.retryPending(reason: "after-failure")
                 }
@@ -216,6 +288,7 @@ extension WatchLink: WCSessionDelegate {
                 self.library.update(id: id, state: .delivered, error: nil)
                 DayTapLog.link.info("transfer delivered \(id, privacy: .public)")
                 self.setStatus("系统已送出，等 iPhone 确认保存")
+                self.refreshSummary(reachable: session.isReachable, reason: "transfer-delivered")
             }
         }
     }
@@ -230,6 +303,7 @@ extension WatchLink: WCSessionDelegate {
             self.library.update(id: id, state: .acknowledged, error: nil)
             DayTapLog.link.info("phone acked \(id, privacy: .public)")
             self.setStatus("iPhone 已保存")
+            self.refreshSummary(reachable: session.isReachable, reason: "acked")
         }
     }
 
