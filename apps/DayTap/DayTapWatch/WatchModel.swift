@@ -22,7 +22,7 @@ final class WatchModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Float = 0
-    @Published var status = "点一下开始录音"
+    @Published var status = ""
     /// 传输通道的一句话状态(待传/送出/已确认),闲时小字展示。
     @Published private(set) var linkStatus = ""
     /// 传输计数(#4):待 iPhone 确认 / 失败条数,闲时角标。
@@ -191,7 +191,7 @@ final class WatchModel: ObservableObject {
             self.level = 0
             self.phase = .recording
             self.permissionDenied = false
-            self.status = "正在录·回表盘也继续,点按停止"
+            // #24:录音态界面(红点/计时/音量条/停止键)自解释,不再配说明文案。
             WKInterfaceDevice.current().play(.start)
             self.startTimer()
         }
@@ -255,7 +255,8 @@ final class WatchModel: ObservableObject {
         )
         link.library.upsert(record)
         link.enqueue(id: id)
-        status = reason ?? "已保存,正在传给 iPhone"
+        // 常规保存不留文案——排队状态由角标/状态句说;只有被打断这类异常才说一句(#24)。
+        status = reason ?? ""
     }
 
     // MARK: - 心跳

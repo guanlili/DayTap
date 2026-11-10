@@ -1,80 +1,45 @@
 import SwiftUI
 
-/// 无感录音界面(#5):看起来就是一块报时表盘。
-/// 握拳(AssistiveTouch 绑快捷指令)、敲桌两下(#11)同样启停;
-/// 录着的时候按表冠回表盘继续录(audio 后台模式),不亮屏不出声。
-/// 手动触发:VAD 自动开录经甲方真机体验后撤下(环境音误触),2026-11-10。
-/// #23:显式红色大按钮替代整屏点按,甲方点名「普通的正常按键」。
+/// 手表录音页(#5→#24 极简化):一块红按钮,出问题才说话。
+/// 启停:红按钮 / 握拳快捷指令 / 敲桌两下(#11);录音中按表冠回表盘继续录(audio 后台模式)。
+/// 时间不再自绘——右上角系统状态栏已有;触发方式的说明收进手机端「使用指南」(#24 甲方定调)。
 struct RecordingScreen: View {
     @ObservedObject var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmDiscard = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            VStack(spacing: 6) {
-                clock(timeline.date)
+        VStack(spacing: 8) {
+            Spacer(minLength: 10)
 
+            if model.phase == .recording {
                 HStack(spacing: 6) {
                     statusDot
-                    if model.phase == .recording {
-                        Text(DayTapFormat.clock(model.elapsed))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 2)
-
-                if model.phase == .recording {
-                    levelBar
-                } else if model.permissionDenied {
-                    Text("请在手表设置里允许 DayTap 使用麦克风")
-                        .font(.caption2)
+                    Text(DayTapFormat.clock(model.elapsed))
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                } else {
-                    Text("敲桌两下也行 · 录着可回表盘")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    transferBadge
-                    if !model.linkStatus.isEmpty {
-                        Text(model.linkStatus)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                    }
-                    Button("再传一次", action: model.retry)
-                        .buttonStyle(.bordered)
-                        .font(.caption2)
-                        .accessibilityIdentifier("daytap.record.retry")
-
-                    // 待传才出现(#22):录了不想传的,表上直接清,不给 iPhone 知道。
-                    if model.transferWaiting > 0 {
-                        Button {
-                            confirmDiscard = true
-                        } label: {
-                            Label("丢弃待传 (\(model.transferWaiting))", systemImage: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                        .font(.caption2)
-                        .accessibilityIdentifier("daytap.record.discard")
-                    }
                 }
-
-                Spacer(minLength: 4)
-
-                recordButton
+                levelBar
+            } else if model.permissionDenied {
+                Text("请在手表设置里允许 DayTap 使用麦克风")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                idleCluster
             }
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .alert("丢弃待传录音?", isPresented: $confirmDiscard) {
-                Button("丢弃", role: .destructive) { model.discardPending() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("\(model.transferWaiting) 条不会传给 iPhone，手表上直接删除。")
-            }
+
+            Spacer(minLength: 8)
+
+            recordButton
+        }
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .alert("丢弃待传录音?", isPresented: $confirmDiscard) {
+            Button("丢弃", role: .destructive) { model.discardPending() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("\(model.transferWaiting) 条不会传给 iPhone，手表上直接删除。")
         }
         .onAppear {
             model.onAppear()
@@ -100,8 +65,45 @@ struct RecordingScreen: View {
         }
     }
 
-    /// 传输角标(#4):待确认/失败一眼可读;有失败时补一行短原因。
-    /// 融进表盘形态:两行 caption2,不亮大屏不弹窗。
+    /// 闲时聚落(#24 出问题才说话):瞬态结果最多一行;有待传/失败才出角标、
+    /// 状态句与「再传一次」;有待传才出「丢弃待传」。全清时整块消失,只剩红按钮。
+    @ViewBuilder
+    private var idleCluster: some View {
+        if !model.status.isEmpty {
+            Text(model.status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+        }
+        transferBadge
+        if model.transferWaiting > 0 || model.transferFailed > 0 {
+            if !model.linkStatus.isEmpty {
+                Text(model.linkStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            Button("再传一次", action: model.retry)
+                .buttonStyle(.bordered)
+                .font(.caption2)
+                .accessibilityIdentifier("daytap.record.retry")
+        }
+        if model.transferWaiting > 0 {
+            Button {
+                confirmDiscard = true
+            } label: {
+                Label("丢弃待传 (\(model.transferWaiting))", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .font(.caption2)
+            .accessibilityIdentifier("daytap.record.discard")
+        }
+    }
+
+    /// 传输角标(#4/#22):待确认(条数+占用)/失败一眼可读;有失败时补一行短原因。
     @ViewBuilder
     private var transferBadge: some View {
         if model.transferFailed > 0 || model.transferWaiting > 0 {
@@ -131,7 +133,7 @@ struct RecordingScreen: View {
     }
 
     /// 显式录音大按钮(#23):像语音备忘录那样一眼可见、可按。
-    /// 闲时=红色实心麦克风开录;录音中=白色方块停止。整屏点按(#5 遗产)随之退役。
+    /// 闲时=红色实心麦克风开录;录音中=白色方块停止。
     private var recordButton: some View {
         Button {
             model.toggle()
@@ -147,20 +149,11 @@ struct RecordingScreen: View {
         .accessibilityIdentifier("daytap.record.toggle")
     }
 
-    private func clock(_ date: Date) -> some View {
-        Text(date.formatted(date: .omitted, time: .shortened))
-            .font(.system(size: 44, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .minimumScaleFactor(0.6)
-            .foregroundStyle(.primary)
-    }
-
-    /// 状态一枚小点:灰=闲,红=正在录。远看就是表盘上的装饰。
+    /// 状态一枚小点:灰=闲,红=正在录。
     private var statusDot: some View {
         Circle()
             .fill(model.phase == .recording ? Color.red : Color.gray)
             .frame(width: 8, height: 8)
-            .opacity(model.phase == .recording ? 1 : 0.35)
     }
 
     private var levelBar: some View {
