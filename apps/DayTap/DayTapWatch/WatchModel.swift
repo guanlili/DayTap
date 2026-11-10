@@ -204,10 +204,13 @@ final class WatchModel: ObservableObject {
         }
         let url = link.library.fileURL(id: id)
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size > 0 else {
+        // 48kbps AAC 下一秒音频就有约 6KB;不到 1KB 的必然是只有容器头的空壳
+        // (prepareToRecord 先写好 28 字节头,帧没落盘时 size>0 检查放过了它,
+        // 真机上出现过录了 16 秒只有 28 字节的空文件,传到 iPhone 后试听打不开)。
+        guard size >= 1024 else {
             try? FileManager.default.removeItem(at: url)
             status = "录音是空的,没有发送"
-            DayTapLog.recorder.error("empty recording \(id, privacy: .public)")
+            DayTapLog.recorder.error("empty recording \(id, privacy: .public) size=\(size)")
             return
         }
         let record = RecordingRecord(

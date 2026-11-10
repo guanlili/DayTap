@@ -108,6 +108,10 @@ struct RecordingListView: View {
                     Text(banner)
                         .font(.footnote)
                 }
+                if let playError = player.loadError {
+                    Text(playError)
+                        .font(.footnote)
+                }
                 if let status = transcriber.statusText {
                     HStack(spacing: 6) {
                         if transcriber.activeID != nil {
@@ -239,14 +243,22 @@ struct RecordingListView: View {
 
     private func subtitle(for record: RecordingRecord) -> String {
         let date = record.createdAt.formatted(date: .abbreviated, time: .shortened)
-        // 转过的条目带「已转文字」标记,方便在列表里一眼分出来。
-        let transcriptMark = record.transcript != nil ? "已转文字 · " : ""
+        // 空壳文件(只有容器头)直接标出来,别让用户点开才发现播不了;
+        // 正常条目带「已转文字」标记。byteCount 在收文件时已按真实落盘大小覆盖。
+        let mark: String
+        if record.byteCount < 1024 {
+            mark = "空录音 · "
+        } else if record.transcript != nil {
+            mark = "已转文字 · "
+        } else {
+            mark = ""
+        }
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount)) · m4a"
         // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
         if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            return "\(date) · \(transcriptMark)\(size)"
+            return "\(date) · \(mark)\(size)"
         }
-        return transcriptMark + size
+        return mark + size
     }
 
     private var trackNote: some View {

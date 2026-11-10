@@ -10,6 +10,8 @@ final class PlaybackCenter: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    /// 最近一次「点试听却打不开」的原因,给列表页提示。成功播放或 reset 时清空。
+    @Published private(set) var loadError: String?
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
@@ -40,8 +42,11 @@ final class PlaybackCenter: ObservableObject {
         }
         guard let newPlayer = try? AVAudioPlayer(contentsOf: fileURL) else {
             DayTapLog.library.error("playback load failed \(record.id, privacy: .public)")
+            // 空壳/损坏文件加载失败不再静默:手表端曾经发出过只有容器头的录音,点试听毫无反应(#17)。
+            loadError = "这条音频打不开（文件是空的或已损坏）。新版手表不再发送这类录音，这条可以从列表忽略。"
             return
         }
+        loadError = nil
         newPlayer.play()
         player = newPlayer
         playingID = record.id
@@ -63,6 +68,7 @@ final class PlaybackCenter: ObservableObject {
         progress = 0
         elapsed = 0
         duration = 0
+        loadError = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 
