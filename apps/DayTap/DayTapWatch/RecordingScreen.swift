@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// 无感录音界面(#5):看起来就是一块报时表盘。
-/// 抬腕看时间 = 武装;有人说话自动开录;全屏点按或握拳 = 立刻开录/停止。
-/// 界面上没有大按钮——这个场景里,显眼的动作本身就是缺陷。
+/// 点一下开始/停止,握拳(AssistiveTouch 绑快捷指令)同样启停;
+/// 录着的时候按表冠回表盘继续录(audio 后台模式),不亮屏不出声。
+/// 手动触发:VAD 自动开录经甲方真机体验后撤下(环境音误触),2026-11-10。
 struct RecordingScreen: View {
     @ObservedObject var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
@@ -12,10 +13,17 @@ struct RecordingScreen: View {
             VStack(spacing: 6) {
                 clock(timeline.date)
 
-                statusDot
-                    .padding(.vertical, 2)
+                HStack(spacing: 6) {
+                    statusDot
+                    if model.phase == .recording {
+                        Text(DayTapFormat.clock(model.elapsed))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
 
-                if model.phase != .idle {
+                if model.phase == .recording {
                     levelBar
                 } else if model.permissionDenied {
                     Text("请在手表设置里允许 DayTap 使用麦克风")
@@ -23,7 +31,7 @@ struct RecordingScreen: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else {
-                    Text("点一下进入无感模式")
+                    Text("点一下录音 · 录着可回表盘")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !model.linkStatus.isEmpty {
@@ -44,7 +52,7 @@ struct RecordingScreen: View {
             .contentShape(Rectangle())
             .onTapGesture { model.toggle() }
             .accessibilityIdentifier("daytap.record.toggle")
-            .accessibilityLabel(accessibilitySummary)
+            .accessibilityLabel(model.phase == .recording ? "正在录音,点按停止并保存" : "录音,点按开始")
             .accessibilityAddTraits(.isButton)
         }
         .onAppear(perform: model.onAppear)
@@ -53,7 +61,7 @@ struct RecordingScreen: View {
             case .active:
                 model.onActive()
             case .background:
-                // audio 后台模式:录音与武装态都继续,不在这里停(#5)。
+                // audio 后台模式:录音继续,不在这里停(#5)。
                 break
             case .inactive:
                 break
@@ -71,20 +79,12 @@ struct RecordingScreen: View {
             .foregroundStyle(.primary)
     }
 
-    /// 状态全靠一枚小点:白=武装待命,红=正在录。远看就是表盘上的装饰。
+    /// 状态一枚小点:灰=闲,红=正在录。远看就是表盘上的装饰。
     private var statusDot: some View {
         Circle()
-            .fill(dotColor)
+            .fill(model.phase == .recording ? Color.red : Color.gray)
             .frame(width: 8, height: 8)
-            .opacity(model.phase == .idle ? 0.25 : 1)
-    }
-
-    private var dotColor: Color {
-        switch model.phase {
-        case .idle: return .gray
-        case .armed: return .white
-        case .recording: return .red
-        }
+            .opacity(model.phase == .recording ? 1 : 0.35)
     }
 
     private var levelBar: some View {
@@ -93,7 +93,7 @@ struct RecordingScreen: View {
             .frame(height: 4)
             .overlay(alignment: .leading) {
                 Capsule()
-                    .fill(model.phase == .recording ? Color.red : Color.white.opacity(0.45))
+                    .fill(Color.red)
                     .scaleEffect(
                         x: CGFloat(max(model.level, 0.08)),
                         y: 1,
@@ -101,13 +101,5 @@ struct RecordingScreen: View {
                     )
             }
             .accessibilityHidden(true)
-    }
-
-    private var accessibilitySummary: String {
-        switch model.phase {
-        case .idle: return "无感录音,闲置,点按进入武装"
-        case .armed: return "无感录音,已武装,听到说话自动开录,点按立刻开录"
-        case .recording: return "无感录音,正在录音,点按停止并保存"
-        }
     }
 }

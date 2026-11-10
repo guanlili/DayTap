@@ -7,7 +7,7 @@ import Foundation
 struct StealthToggleIntent: AppIntent {
     static var title: LocalizedStringResource = "无感录音启停"
     static var description = IntentDescription(
-        "一条龙切换:闲置→武装,武装→立刻开录,录音中→停止保存并传 iPhone。适合绑到 AssistiveTouch 手势。"
+        "手动触发:闲→开始录音(回表盘继续),录音中→停止保存并传 iPhone。适合绑到 AssistiveTouch 手势。"
     )
 
     static var openAppWhenRun = false
@@ -19,16 +19,16 @@ struct StealthToggleIntent: AppIntent {
     }
 }
 
-/// 手动停止专用(误入武装想安静退出时用,和启停分开更稳)。
+/// 录错了静默丢弃:停止且不保存不传出。
 struct StealthDisarmIntent: AppIntent {
-    static var title: LocalizedStringResource = "解除无感模式"
-    static var description = IntentDescription("静默退出武装/录音状态,未触发的内容不保存。")
+    static var title: LocalizedStringResource = "丢弃当前录音"
+    static var description = IntentDescription("停止当前录音并直接丢弃,不保存不传 iPhone。")
 
     static var openAppWhenRun = false
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        WatchModel.shared.disarmFromIntent()
+        WatchModel.shared.discardFromIntent()
         return .result()
     }
 }
