@@ -30,6 +30,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 手机端转写出的全文。nil=还没转过。
     /// 可选字段,旧 index.json 解码为 nil,天然向后兼容;不参与手表传输协议。
     var transcript: String?
+    /// 录音来源(#3):nil=手表(旧数据天然如此),"phone"=手机直接录。
+    /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机录的永远不出本机)。
+    var origin: String? = nil
 
     /// 列表标题:起了名用名字,没起名用时间。
     var title: String {

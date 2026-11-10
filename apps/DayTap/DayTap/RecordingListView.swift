@@ -13,6 +13,7 @@ struct RecordingListView: View {
     @ObservedObject private var library = PhoneLink.shared.library
     @StateObject private var player = PlaybackCenter()
     @StateObject private var transcriber = TranscriptionCenter(library: PhoneLink.shared.library)
+    @StateObject private var recorder = PhoneRecorder()
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var exportURL: URL?
@@ -46,6 +47,9 @@ struct RecordingListView: View {
                     .accessibilityLabel("使用指南")
                     .accessibilityIdentifier("daytap.guide")
                 }
+                ToolbarItem(placement: .bottomBar) {
+                    recordControl
+                }
             }
         }
         .fileExporter(
@@ -68,6 +72,10 @@ struct RecordingListView: View {
                 link.activate()
             } else if phase != .inactive {
                 player.reset()
+                // 手机不开后台模式:退后台即停录保存(#3),与手表同口径。
+                if recorder.isRecording {
+                    recorder.toggle()
+                }
             }
         }
         .alert("重命名", isPresented: renameBinding) {
@@ -132,7 +140,7 @@ struct RecordingListView: View {
             VStack(spacing: 8) {
                 Text("还没有录音")
                     .font(.title3.bold())
-                Text("在 Apple Watch 上打开 DayTap，点一下「开始」。\n录完会自动出现在这里。")
+                Text("手表点一下「开始」，或点下方红钮用 iPhone 直接录。\n录完都会出现在这里。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -167,7 +175,8 @@ struct RecordingListView: View {
     /// 首屏 = 录音本身。手表未连接 / 报错 / 转写进度才在顶部多出小卡,平时完全安静。
     private var list: some View {
         List {
-            if !link.sessionReady || banner != nil || player.loadError != nil || transcriber.statusText != nil {
+            if !link.sessionReady || banner != nil || player.loadError != nil
+                || transcriber.statusText != nil || recorder.statusText != nil {
                 Section {
                     if !link.sessionReady {
                         statusCard
@@ -191,6 +200,14 @@ struct RecordingListView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("daytap.transcribe.status")
                     }
+                    if let status = recorder.statusText {
+                        HStack(spacing: 8) {
+                            Text(status)
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("daytap.phone.status")
+                    }
                 }
             }
 
@@ -199,6 +216,53 @@ struct RecordingListView: View {
                     row(record)
                 }
             }
+        }
+    }
+
+    /// 底栏录音钮(#3):闲时红色大麦克风;录时红点+计时+音量条+停止键。语音备忘录的语言。
+    @ViewBuilder
+    private var recordControl: some View {
+        if recorder.isRecording {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 10)
+                Text(DayTapFormat.clock(recorder.elapsed))
+                    .font(.callout.monospacedDigit())
+                Capsule()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(width: 64, height: 4)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.red)
+                            .frame(width: 64 * CGFloat(max(recorder.level, 0.08)), height: 4)
+                    }
+                    .accessibilityHidden(true)
+                Spacer()
+                Button {
+                    recorder.toggle()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Color.red))
+                }
+                .accessibilityLabel("停止并保存")
+                .accessibilityIdentifier("daytap.phone.stop")
+            }
+        } else {
+            Button {
+                recorder.toggle()
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.red))
+            }
+            .accessibilityLabel("用 iPhone 录音")
+            .accessibilityIdentifier("daytap.phone.record")
         }
     }
 
@@ -394,15 +458,13 @@ struct RecordingListView: View {
         // 数字日期比「2026年11月10日」短一截,转写过的行才不至于折成两行(#19)。
         let date = record.createdAt.formatted(date: .numeric, time: .shortened)
         // 空壳文件(只有容器头)直接标出来,别让用户点开才发现播不了;
-        // 正常条目带「已转文字」标记。byteCount 在收文件时已按真实落盘大小覆盖;
+        // 正常条目带「已转文字」标记;手机录的标来源(#3)。byteCount 已按真实落盘大小;
         // 不写 m4a——条条都是,语音备忘录也不标格式,格式知识在指南里(#19)。
-        let mark: String
+        var mark = record.origin == "phone" ? "手机录 · " : ""
         if record.byteCount < 1024 {
-            mark = "空录音 · "
+            mark += "空录音 · "
         } else if record.transcript != nil {
-            mark = "已转文字 · "
-        } else {
-            mark = ""
+            mark += "已转文字 · "
         }
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount))"
         // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
@@ -506,8 +568,8 @@ private struct GuideSheet: View {
                 Section("分工") {
                     guideRow(
                         icon: "applewatch",
-                        title: "手表只负责录音，不连接得到。",
-                        detail: "录音传到 iPhone 确认保存后，手表上的原件会自动清除，不占手表空间。"
+                        title: "手表和 iPhone 都能录音，不连接得到。",
+                        detail: "手表录音传到 iPhone 确认保存后，手表原件自动清除；iPhone 点列表下方红钮也能直接录（手机录的只存在本机）。"
                     )
                 }
 
