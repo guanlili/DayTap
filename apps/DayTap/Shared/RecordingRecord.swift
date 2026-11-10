@@ -27,6 +27,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 手机端重命名的显示名(#2)。nil=还没起过名,列表和分享名退回时间戳。
     /// 可选字段,旧 index.json 解码为 nil,天然向后兼容;不参与手表传输协议。
     var displayName: String?
+    /// 手机端转写出的全文。nil=还没转过。
+    /// 可选字段,旧 index.json 解码为 nil,天然向后兼容;不参与手表传输协议。
+    var transcript: String?
 
     /// 列表标题:起了名用名字,没起名用时间。
     var title: String {

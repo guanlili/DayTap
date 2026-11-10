@@ -2,12 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// iPhone 上的收件箱。不做录音。
+/// 转文字：点「转文字」用系统语音识别在本机出全文，全文进 sheet 查看、复制、分享。
 /// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
 /// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
 struct RecordingListView: View {
     @ObservedObject private var link = PhoneLink.shared
     @ObservedObject private var library = PhoneLink.shared.library
     @StateObject private var player = PlaybackCenter()
+    @StateObject private var transcriber = TranscriptionCenter(library: PhoneLink.shared.library)
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var exportURL: URL?
@@ -16,6 +18,7 @@ struct RecordingListView: View {
     @State private var banner: String?
     @State private var renamingRecord: RecordingRecord?
     @State private var newName = ""
+    @State private var transcriptRecord: RecordingRecord?
 
     var body: some View {
         NavigationStack {
@@ -64,6 +67,13 @@ struct RecordingListView: View {
         } message: {
             Text("列表标题与分享、导出的文件名都会跟随新名字。留空则恢复默认时间戳名。")
         }
+        .sheet(item: $transcriptRecord) { record in
+            TranscriptView(
+                recordID: record.id,
+                library: PhoneLink.shared.library,
+                transcriber: transcriber
+            )
+        }
     }
 
     /// 只在选中的那条还在时弹 alert,避免多条同时弹。
@@ -97,6 +107,17 @@ struct RecordingListView: View {
                 if let banner {
                     Text(banner)
                         .font(.footnote)
+                }
+                if let status = transcriber.statusText {
+                    HStack(spacing: 6) {
+                        if transcriber.activeID != nil {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(status)
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
                 trackNote
             }
@@ -158,6 +179,30 @@ struct RecordingListView: View {
                     Label("存到文件", systemImage: "folder")
                 }
                 .disabled(!fileExists)
+
+                if transcriber.activeID == record.id {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("转写中")
+                    }
+                    .foregroundStyle(.secondary)
+                } else if record.transcript != nil {
+                    Button {
+                        transcriptRecord = record
+                    } label: {
+                        Label("全文", systemImage: "text.quote")
+                    }
+                    .accessibilityIdentifier("daytap.transcript.\(record.id)")
+                } else {
+                    Button {
+                        transcriber.transcribe(record)
+                    } label: {
+                        Label("转文字", systemImage: "text.bubble")
+                    }
+                    .disabled(!fileExists)
+                    .accessibilityIdentifier("daytap.transcribe.\(record.id)")
+                }
             }
             .font(.callout)
             .buttonStyle(.borderless)
@@ -194,17 +239,20 @@ struct RecordingListView: View {
 
     private func subtitle(for record: RecordingRecord) -> String {
         let date = record.createdAt.formatted(date: .abbreviated, time: .shortened)
+        // 转过的条目带「已转文字」标记,方便在列表里一眼分出来。
+        let transcriptMark = record.transcript != nil ? "已转文字 · " : ""
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount)) · m4a"
         // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
         if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            return "\(date) · \(size)"
+            return "\(date) · \(transcriptMark)\(size)"
         }
-        return size
+        return transcriptMark + size
     }
 
     private var trackNote: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("手表只负责录音，不连接得到。")
+            Text("转文字：点录音下方的「转文字」，用 iPhone 自带的语音识别在本机出全文（首次需要下载中文语音模型，之后离线可用）。")
             Text("Track 1：分享或「存到文件」后，用飞书妙记、快捷指令转写，或把文件送到 Mac 做系统转写。文字再贴给 Bot。不要把这条音频送进得到。")
             Text("Track 2：点「分享」，选得到大脑；或在得到里用「导入音视频」选这个 m4a。得到只在这台 iPhone 上。")
             Text("在「文件」App 里打开：我的 iPhone → DayTap。链接 daytap://recordings 会回到这个列表。")
@@ -233,5 +281,67 @@ struct RecordingListView: View {
         fresh.displayName = trimmed.isEmpty ? nil : trimmed
         library.upsert(fresh)
         DayTapLog.library.info("renamed \(target.id, privacy: .public)")
+    }
+}
+
+/// 全文 sheet:转写结果的可选中文本,配复制 / 分享文字 / 重新转写。
+/// 内容按 id 从库内实时取,重转完成后文字自动刷新。
+private struct TranscriptView: View {
+    let recordID: String
+    @ObservedObject var library: RecordingLibrary
+    @ObservedObject var transcriber: TranscriptionCenter
+
+    private var record: RecordingRecord? {
+        library.record(id: recordID)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let text = record?.transcript {
+                    ScrollView {
+                        Text(text)
+                            .font(.body)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                } else if transcriber.activeID == recordID {
+                    ProgressView("正在转写…")
+                } else {
+                    Text("还没有转写文字")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(record?.title ?? "全文")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if let record {
+                            transcriber.transcribe(record)
+                        }
+                    } label: {
+                        Label("重新转写", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(transcriber.activeID != nil)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let text = record?.transcript {
+                        ShareLink(item: text) {
+                            Label("分享文字", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        UIPasteboard.general.string = record?.transcript
+                    } label: {
+                        Label("复制全文", systemImage: "doc.on.doc")
+                    }
+                    .disabled(record?.transcript == nil)
+                }
+            }
+        }
     }
 }
