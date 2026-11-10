@@ -89,3 +89,6 @@ corpus/daily/**
 !corpus/daily/.gitkeep
 corpus/sessions/**
 !corpus/sessions/.gitkeep
+
+# 博客草稿与配图,仅本地
+blog/
