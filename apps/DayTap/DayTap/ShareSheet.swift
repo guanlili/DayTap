@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// 把 m4a 交给系统分享表。得到大脑、飞书、文件、隔空投送只要注册了音频类型，就会出现在表里。
@@ -13,6 +14,19 @@ struct DayTapAudioFile: Transferable {
         }
     }
 }
+
+/// 菜单/轻扫里的「分享」用:程序化拉起系统分享表。
+/// ShareLink 进不了 Menu,长按菜单与 swipeActions 只能走 Button(#19)。
+struct ActivityShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 
 /// 「存到文件」用的文档包装。只导出，不从外部打开。
 struct M4AFile: FileDocument {

@@ -5,9 +5,9 @@ import UniformTypeIdentifiers
 /// 转文字：点「转文字」用系统语音识别在本机出全文，全文进 sheet 查看、复制、分享。
 /// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
 /// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
-/// #15 重设计:首屏只留录音本身——Track 1/2 指南收进工具栏 ⓘ sheet,
-/// 连接/报错/转写状态「出问题才说话」浮小卡;列表行改波形标+播放态三处同红,
-/// 操作图标化:试听主按钮+分享+更多菜单,转文字三态收进行内胶囊。
+/// #15 重设计:首屏只留录音本身——指南收进工具栏 ⓘ sheet,状态「出问题才说话」。
+/// #19 二稿(less is more):行内只留标题+副标题+一个播放键(整行轻点=试听),
+/// 分享/存到文件/转文字/重命名收进长按菜单,左右轻扫给快捷;去掉波形图标与行内胶囊。
 struct RecordingListView: View {
     @ObservedObject private var link = PhoneLink.shared
     @ObservedObject private var library = PhoneLink.shared.library
@@ -22,6 +22,7 @@ struct RecordingListView: View {
     @State private var renamingRecord: RecordingRecord?
     @State private var newName = ""
     @State private var transcriptRecord: RecordingRecord?
+    @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
 
     var body: some View {
@@ -81,6 +82,10 @@ struct RecordingListView: View {
                 library: PhoneLink.shared.library,
                 transcriber: transcriber
             )
+        }
+        .sheet(item: $shareRecord) { record in
+            ActivityShareSheet(url: library.fileURL(id: record.id))
+                .ignoresSafeArea()
         }
         .sheet(isPresented: $showGuide) {
             GuideSheet()
@@ -206,15 +211,15 @@ struct RecordingListView: View {
         .accessibilityIdentifier("daytap.banner")
     }
 
+    /// #19 极简行:标题+副标题+一个播放键,整行轻点=试听;
+    /// 其余动作全在长按菜单,轻扫给快捷(左滑转文字/全文,右滑分享)。
     private func row(_ record: RecordingRecord) -> some View {
         let fileExists = FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
         let active = player.playingID == record.id
         let playing = active && player.isPlaying
 
-        return HStack(alignment: .top, spacing: 14) {
-            waveformBadge(active: active)
-
-            VStack(alignment: .leading, spacing: 4) {
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(record.title)
                     .font(.body.weight(.semibold))
                     .lineLimit(2)
@@ -225,76 +230,62 @@ struct RecordingListView: View {
                 if active {
                     playbackBar(record)
                 }
-
-                HStack(spacing: 10) {
-                    Button {
-                        guard fileExists else {
-                            banner = "找不到这条音频文件"
-                            return
-                        }
-                        player.toggle(record, fileURL: library.fileURL(id: record.id))
-                    } label: {
-                        Image(systemName: playing ? "pause.fill" : "play.fill")
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(active ? Color.white : Color.accentColor)
-                            .frame(width: 32, height: 32)
-                            .background(
-                                Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
-                            )
-                    }
-                    .disabled(!fileExists)
-                    .accessibilityLabel(playing ? "暂停" : "试听")
-                    .accessibilityIdentifier("daytap.play.\(record.id)")
-
-                    if fileExists, let shareURL = link.shareFileURL(for: record) {
-                        ShareLink(
-                            item: DayTapAudioFile(url: shareURL),
-                            preview: SharePreview(
-                                record.title,
-                                image: Image(systemName: "waveform")
-                            )
-                        ) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityLabel("分享")
-                        .accessibilityIdentifier("daytap.share.\(record.id)")
-                    }
-
-                    Menu {
-                        Button {
-                            prepareExport(record)
-                        } label: {
-                            Label("存到文件", systemImage: "folder")
-                        }
-                        .disabled(!fileExists)
-
-                        Button {
-                            newName = record.displayName ?? ""
-                            renamingRecord = record
-                        } label: {
-                            Label("重命名", systemImage: "pencil")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("更多操作")
-                    .accessibilityIdentifier("daytap.more.\(record.id)")
-
-                    Spacer(minLength: 2)
-
-                    transcriptChip(record, fileExists: fileExists)
-                }
-                .buttonStyle(.borderless)
             }
+
+            Spacer(minLength: 8)
+
+            Button {
+                togglePlay(record, fileExists: fileExists)
+            } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(active ? Color.white : Color.accentColor)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
+                    )
+            }
+            .disabled(!fileExists)
+            .buttonStyle(.borderless)
+            .accessibilityLabel(playing ? "暂停" : "试听")
+            .accessibilityIdentifier("daytap.play.\(record.id)")
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { togglePlay(record, fileExists: fileExists) }
         .contextMenu {
+            if record.transcript != nil {
+                Button {
+                    transcriptRecord = record
+                } label: {
+                    Label("查看全文", systemImage: "text.quote")
+                }
+                .accessibilityIdentifier("daytap.transcript.\(record.id)")
+            } else if fileExists {
+                Button {
+                    transcriber.transcribe(record)
+                } label: {
+                    Label("转文字", systemImage: "text.bubble")
+                }
+                .disabled(transcriber.activeID != nil)
+                .accessibilityIdentifier("daytap.transcribe.\(record.id)")
+            }
+
+            Button {
+                shareRecord = record
+            } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            .disabled(!fileExists)
+            .accessibilityIdentifier("daytap.share.\(record.id)")
+
+            Button {
+                prepareExport(record)
+            } label: {
+                Label("存到文件", systemImage: "folder")
+            }
+            .disabled(!fileExists)
+
             Button {
                 newName = record.displayName ?? ""
                 renamingRecord = record
@@ -302,58 +293,44 @@ struct RecordingListView: View {
                 Label("重命名", systemImage: "pencil")
             }
         }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                shareRecord = record
+            } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            .tint(.accentColor)
+            .disabled(!fileExists)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if record.transcript != nil {
+                Button {
+                    transcriptRecord = record
+                } label: {
+                    Label("全文", systemImage: "text.quote")
+                }
+                .tint(.accentColor)
+            } else if fileExists {
+                Button {
+                    transcriber.transcribe(record)
+                } label: {
+                    Label("转文字", systemImage: "text.bubble")
+                }
+                .tint(.accentColor)
+                .disabled(transcriber.activeID != nil)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("daytap.recording.\(record.id)")
     }
 
-    /// 行首波形标:闲时淡蓝装饰,播放中转红,远扫一眼就知道哪条在响。
-    private func waveformBadge(active: Bool) -> some View {
-        Image(systemName: "waveform")
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(active ? Color.red : Color.accentColor)
-            .frame(width: 42, height: 42)
-            .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(active ? Color.red.opacity(0.14) : Color.accentColor.opacity(0.12))
-            )
-    }
-
-    /// 转文字三态胶囊:没转过=「转文字」,转着=转写中,转过=「全文」。
-    private func transcriptChip(_ record: RecordingRecord, fileExists: Bool) -> some View {
-        Group {
-            if transcriber.activeID == record.id {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("转写中")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            } else if record.transcript != nil {
-                chip("全文", icon: "text.quote") {
-                    transcriptRecord = record
-                }
-                .accessibilityIdentifier("daytap.transcript.\(record.id)")
-            } else {
-                chip("转文字", icon: "text.bubble") {
-                    transcriber.transcribe(record)
-                }
-                .disabled(!fileExists)
-                .accessibilityIdentifier("daytap.transcribe.\(record.id)")
-            }
+    /// 整行与播放键共用一份启停逻辑,文件不在就提示。
+    private func togglePlay(_ record: RecordingRecord, fileExists: Bool) {
+        guard fileExists else {
+            banner = "找不到这条音频文件"
+            return
         }
-    }
-
-    private func chip(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.accentColor.opacity(0.1)))
-        }
-        .buttonStyle(.borderless)
+        player.toggle(record, fileURL: library.fileURL(id: record.id))
     }
 
     /// 试听进度:一行时间 + 细进度条。只占播放中那一行,红进度与行首同色。
@@ -374,9 +351,11 @@ struct RecordingListView: View {
     }
 
     private func subtitle(for record: RecordingRecord) -> String {
-        let date = record.createdAt.formatted(date: .abbreviated, time: .shortened)
+        // 数字日期比「2026年11月10日」短一截,转写过的行才不至于折成两行(#19)。
+        let date = record.createdAt.formatted(date: .numeric, time: .shortened)
         // 空壳文件(只有容器头)直接标出来,别让用户点开才发现播不了;
-        // 正常条目带「已转文字」标记。byteCount 在收文件时已按真实落盘大小覆盖。
+        // 正常条目带「已转文字」标记。byteCount 在收文件时已按真实落盘大小覆盖;
+        // 不写 m4a——条条都是,语音备忘录也不标格式,格式知识在指南里(#19)。
         let mark: String
         if record.byteCount < 1024 {
             mark = "空录音 · "
@@ -385,7 +364,7 @@ struct RecordingListView: View {
         } else {
             mark = ""
         }
-        let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount)) · m4a"
+        let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount))"
         // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
         if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             return "\(date) · \(mark)\(size)"
@@ -486,6 +465,14 @@ private struct GuideSheet: View {
             List {
                 Section("分工") {
                     guideRow(icon: "applewatch", title: "手表只负责录音，不连接得到。")
+                }
+
+                Section("操作") {
+                    guideRow(
+                        icon: "hand.tap",
+                        title: "轻点 · 长按 · 轻扫",
+                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名；左滑出「转文字」或「全文」，右滑出「分享」。"
+                    )
                 }
 
                 Section("转写路线") {
