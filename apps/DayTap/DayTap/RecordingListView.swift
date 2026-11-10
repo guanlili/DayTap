@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 /// 转文字：点「转文字」用系统语音识别在本机出全文，全文进 sheet 查看、复制、分享。
 /// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
 /// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
+/// #15 重设计:首屏只留录音本身——Track 1/2 指南收进工具栏 ⓘ sheet,
+/// 连接/报错/转写状态「出问题才说话」浮小卡;列表行改波形标+播放态三处同红,
+/// 操作图标化:试听主按钮+分享+更多菜单,转文字三态收进行内胶囊。
 struct RecordingListView: View {
     @ObservedObject private var link = PhoneLink.shared
     @ObservedObject private var library = PhoneLink.shared.library
@@ -19,6 +22,7 @@ struct RecordingListView: View {
     @State private var renamingRecord: RecordingRecord?
     @State private var newName = ""
     @State private var transcriptRecord: RecordingRecord?
+    @State private var showGuide = false
 
     var body: some View {
         NavigationStack {
@@ -32,9 +36,13 @@ struct RecordingListView: View {
             .navigationTitle("DayTap")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text(link.sessionReady ? "通道就绪" : "未连接")
-                        .font(.caption)
-                        .foregroundStyle(link.sessionReady ? .green : .secondary)
+                    Button {
+                        showGuide = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityLabel("使用指南")
+                    .accessibilityIdentifier("daytap.guide")
                 }
             }
         }
@@ -50,7 +58,7 @@ struct RecordingListView: View {
             }
         }
         .onOpenURL { url in
-            banner = "已打开 DayTap 录音列表"
+            // #15:「已打开录音列表」对正在看屏幕的人没有信息量,只留日志。
             DayTapLog.link.info("open url \(url.absoluteString, privacy: .public)")
         }
         .onChange(of: scenePhase) { _, phase in
@@ -74,6 +82,9 @@ struct RecordingListView: View {
                 transcriber: transcriber
             )
         }
+        .sheet(isPresented: $showGuide) {
+            GuideSheet()
+        }
     }
 
     /// 只在选中的那条还在时弹 alert,避免多条同时弹。
@@ -85,47 +96,82 @@ struct RecordingListView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("还没有手表录音")
-                .font(.title2.bold())
-            Text("在 Apple Watch 上打开 DayTap，点一次「开始」，再点「停止」。音频会出现在这里。")
-            Text(link.status)
-                .font(.footnote)
+        VStack(spacing: 22) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.1))
+                    .frame(width: 104, height: 104)
+                Image(systemName: "waveform")
+                    .font(.system(size: 42, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            VStack(spacing: 8) {
+                Text("还没有录音")
+                    .font(.title3.bold())
+                Text("在 Apple Watch 上打开 DayTap，点一下「开始」。\n录完会自动出现在这里。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            if !link.sessionReady {
+                HStack(spacing: 6) {
+                    Image(systemName: "applewatch")
+                    Text(link.status)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            trackNote
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
+
+            Button {
+                showGuide = true
+            } label: {
+                Label("使用指南", systemImage: "book")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// 首屏 = 录音本身。手表未连接 / 报错 / 转写进度才在顶部多出小卡,平时完全安静。
     private var list: some View {
         List {
-            Section {
-                Text(link.status)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if let banner {
-                    Text(banner)
-                        .font(.footnote)
-                }
-                if let playError = player.loadError {
-                    Text(playError)
-                        .font(.footnote)
-                }
-                if let status = transcriber.statusText {
-                    HStack(spacing: 6) {
-                        if transcriber.activeID != nil {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(status)
+            if !link.sessionReady || banner != nil || player.loadError != nil || transcriber.statusText != nil {
+                Section {
+                    if !link.sessionReady {
+                        statusCard
                     }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    if let banner {
+                        errorCard(banner)
+                    }
+                    if let playError = player.loadError {
+                        errorCard(playError)
+                            .accessibilityIdentifier("daytap.play.error")
+                    }
+                    if let status = transcriber.statusText {
+                        HStack(spacing: 8) {
+                            if transcriber.activeID != nil {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(status)
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("daytap.transcribe.status")
+                    }
                 }
-                trackNote
             }
-            Section("最近录音") {
+
+            Section {
                 ForEach(library.records) { record in
                     row(record)
                 }
@@ -133,85 +179,121 @@ struct RecordingListView: View {
         }
     }
 
+    private var statusCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "applewatch")
+                .font(.body.weight(.medium))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("等待手表")
+                    .font(.subheadline.weight(.semibold))
+                Text(link.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("daytap.link.status")
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.footnote)
+        }
+        .listRowBackground(Color.orange.opacity(0.12))
+        .accessibilityIdentifier("daytap.banner")
+    }
+
     private func row(_ record: RecordingRecord) -> some View {
         let fileExists = FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
+        let active = player.playingID == record.id
+        let playing = active && player.isPlaying
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(record.title)
-                .font(.body.weight(.semibold))
-            Text(subtitle(for: record))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        return HStack(alignment: .top, spacing: 14) {
+            waveformBadge(active: active)
 
-            if player.playingID == record.id {
-                playbackBar(record)
-            }
-
-            HStack(spacing: 16) {
-                Button {
-                    guard fileExists else {
-                        banner = "找不到这条音频文件"
-                        return
-                    }
-                    player.toggle(record, fileURL: library.fileURL(id: record.id))
-                } label: {
-                    Label(
-                        player.playingID == record.id && player.isPlaying ? "暂停" : "试听",
-                        systemImage: player.playingID == record.id && player.isPlaying
-                            ? "pause.fill" : "play.fill"
-                    )
-                }
-                .disabled(!fileExists)
-                .accessibilityIdentifier("daytap.play.\(record.id)")
-
-                if fileExists, let shareURL = link.shareFileURL(for: record) {
-                    ShareLink(
-                        item: DayTapAudioFile(url: shareURL),
-                        preview: SharePreview(
-                            record.title,
-                            image: Image(systemName: "waveform")
-                        )
-                    ) {
-                        Label("分享", systemImage: "square.and.arrow.up")
-                    }
-                    .accessibilityIdentifier("daytap.share.\(record.id)")
-                }
-
-                Button {
-                    prepareExport(record)
-                } label: {
-                    Label("存到文件", systemImage: "folder")
-                }
-                .disabled(!fileExists)
-
-                if transcriber.activeID == record.id {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("转写中")
-                    }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(record.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
+                Text(subtitle(for: record))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                } else if record.transcript != nil {
+
+                if active {
+                    playbackBar(record)
+                }
+
+                HStack(spacing: 10) {
                     Button {
-                        transcriptRecord = record
+                        guard fileExists else {
+                            banner = "找不到这条音频文件"
+                            return
+                        }
+                        player.toggle(record, fileURL: library.fileURL(id: record.id))
                     } label: {
-                        Label("全文", systemImage: "text.quote")
-                    }
-                    .accessibilityIdentifier("daytap.transcript.\(record.id)")
-                } else {
-                    Button {
-                        transcriber.transcribe(record)
-                    } label: {
-                        Label("转文字", systemImage: "text.bubble")
+                        Image(systemName: playing ? "pause.fill" : "play.fill")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(active ? Color.white : Color.accentColor)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
+                            )
                     }
                     .disabled(!fileExists)
-                    .accessibilityIdentifier("daytap.transcribe.\(record.id)")
+                    .accessibilityLabel(playing ? "暂停" : "试听")
+                    .accessibilityIdentifier("daytap.play.\(record.id)")
+
+                    if fileExists, let shareURL = link.shareFileURL(for: record) {
+                        ShareLink(
+                            item: DayTapAudioFile(url: shareURL),
+                            preview: SharePreview(
+                                record.title,
+                                image: Image(systemName: "waveform")
+                            )
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel("分享")
+                        .accessibilityIdentifier("daytap.share.\(record.id)")
+                    }
+
+                    Menu {
+                        Button {
+                            prepareExport(record)
+                        } label: {
+                            Label("存到文件", systemImage: "folder")
+                        }
+                        .disabled(!fileExists)
+
+                        Button {
+                            newName = record.displayName ?? ""
+                            renamingRecord = record
+                        } label: {
+                            Label("重命名", systemImage: "pencil")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("更多操作")
+                    .accessibilityIdentifier("daytap.more.\(record.id)")
+
+                    Spacer(minLength: 2)
+
+                    transcriptChip(record, fileExists: fileExists)
                 }
+                .buttonStyle(.borderless)
             }
-            .font(.callout)
-            .buttonStyle(.borderless)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contextMenu {
             Button {
                 newName = record.displayName ?? ""
@@ -224,7 +306,57 @@ struct RecordingListView: View {
         .accessibilityIdentifier("daytap.recording.\(record.id)")
     }
 
-    /// 试听进度:一行时间 + 细进度条。只占播放中那一行。
+    /// 行首波形标:闲时淡蓝装饰,播放中转红,远扫一眼就知道哪条在响。
+    private func waveformBadge(active: Bool) -> some View {
+        Image(systemName: "waveform")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(active ? Color.red : Color.accentColor)
+            .frame(width: 42, height: 42)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(active ? Color.red.opacity(0.14) : Color.accentColor.opacity(0.12))
+            )
+    }
+
+    /// 转文字三态胶囊:没转过=「转文字」,转着=转写中,转过=「全文」。
+    private func transcriptChip(_ record: RecordingRecord, fileExists: Bool) -> some View {
+        Group {
+            if transcriber.activeID == record.id {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("转写中")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            } else if record.transcript != nil {
+                chip("全文", icon: "text.quote") {
+                    transcriptRecord = record
+                }
+                .accessibilityIdentifier("daytap.transcript.\(record.id)")
+            } else {
+                chip("转文字", icon: "text.bubble") {
+                    transcriber.transcribe(record)
+                }
+                .disabled(!fileExists)
+                .accessibilityIdentifier("daytap.transcribe.\(record.id)")
+            }
+        }
+    }
+
+    private func chip(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color.accentColor.opacity(0.1)))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    /// 试听进度:一行时间 + 细进度条。只占播放中那一行,红进度与行首同色。
     private func playbackBar(_ record: RecordingRecord) -> some View {
         VStack(spacing: 4) {
             HStack {
@@ -236,7 +368,7 @@ struct RecordingListView: View {
             .foregroundStyle(.secondary)
 
             ProgressView(value: player.progress)
-                .tint(.accentColor)
+                .tint(.red)
         }
         .accessibilityIdentifier("daytap.playback.\(record.id)")
     }
@@ -259,19 +391,6 @@ struct RecordingListView: View {
             return "\(date) · \(mark)\(size)"
         }
         return mark + size
-    }
-
-    private var trackNote: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("手表只负责录音，不连接得到。")
-            Text("转文字：点录音下方的「转文字」，用 iPhone 自带的语音识别在本机出全文（首次需要下载中文语音模型，之后离线可用）。")
-            Text("Track 1：分享或「存到文件」后，用飞书妙记、快捷指令转写，或把文件送到 Mac 做系统转写。文字再贴给 Bot。不要把这条音频送进得到。")
-            Text("Track 2：点「分享」，选得到大脑；或在得到里用「导入音视频」选这个 m4a。得到只在这台 iPhone 上。")
-            Text("在「文件」App 里打开：我的 iPhone → DayTap。链接 daytap://recordings 会回到这个列表。")
-            Text("这是开发版，还不能从 App Store 安装。表上没装好时，用手机上的得到、语音备忘录或飞书妙记录（Track 0）。")
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
 
     private func prepareExport(_ record: RecordingRecord) {
@@ -355,5 +474,80 @@ private struct TranscriptView: View {
                 }
             }
         }
+    }
+}
+
+/// 使用指南(#15):原首屏文字墙收纳于此,内容一字不丢,只换排版。
+private struct GuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("分工") {
+                    guideRow(icon: "applewatch", title: "手表只负责录音，不连接得到。")
+                }
+
+                Section("转写路线") {
+                    guideRow(
+                        icon: "text.bubble",
+                        title: "转文字 · 本机出全文",
+                        detail: "点录音下方的「转文字」，用 iPhone 自带的语音识别在本机完成（首次需要下载中文语音模型，之后离线可用）。"
+                    )
+                    guideRow(
+                        icon: "text.quote",
+                        title: "Track 1 · 转写后贴给 Bot",
+                        detail: "分享或「存到文件」后，用飞书妙记、快捷指令转写，或把文件送到 Mac 做系统转写。文字再贴给 Bot。不要把这条音频送进得到。"
+                    )
+                    guideRow(
+                        icon: "brain",
+                        title: "Track 2 · 得到大脑",
+                        detail: "点「分享」，选得到大脑；或在得到里用「导入音视频」选这个 m4a。得到只在这台 iPhone 上。"
+                    )
+                }
+
+                Section("文件在哪里") {
+                    guideRow(
+                        icon: "folder",
+                        title: "我的 iPhone → DayTap",
+                        detail: "在「文件」App 里打开。链接 daytap://recordings 会回到这个列表。"
+                    )
+                }
+
+                Section {
+                    guideRow(
+                        icon: "wrench.and.screwdriver",
+                        title: "这是开发版",
+                        detail: "还不能从 App Store 安装。表上没装好时，用手机上的得到、语音备忘录或飞书妙记录（Track 0）。"
+                    )
+                }
+            }
+            .navigationTitle("使用指南")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func guideRow(icon: String, title: String, detail: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
