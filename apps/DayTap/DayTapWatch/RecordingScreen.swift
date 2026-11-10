@@ -34,6 +34,7 @@ struct RecordingScreen: View {
                     Text("点一下录音 · 录着可回表盘")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    transferBadge
                     if !model.linkStatus.isEmpty {
                         Text(model.linkStatus)
                             .font(.caption2)
@@ -68,6 +69,33 @@ struct RecordingScreen: View {
             @unknown default:
                 break
             }
+        }
+    }
+
+    /// 传输角标(#4):待确认/失败一眼可读;有失败时补一行短原因。
+    /// 融进表盘形态:两行 caption2,不亮大屏不弹窗。
+    @ViewBuilder
+    private var transferBadge: some View {
+        if model.transferFailed > 0 || model.transferWaiting > 0 {
+            VStack(spacing: 2) {
+                HStack(spacing: 8) {
+                    if model.transferWaiting > 0 {
+                        Label("\(model.transferWaiting)", systemImage: "arrow.uturn.up")
+                    }
+                    if model.transferFailed > 0 {
+                        Label("\(model.transferFailed)", systemImage: "exclamationmark.triangle")
+                    }
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(model.transferFailed > 0 ? Color.orange : Color.secondary)
+                if model.transferFailed > 0, let error = model.transferError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .accessibilityIdentifier("daytap.transfer.badge")
         }
     }
 

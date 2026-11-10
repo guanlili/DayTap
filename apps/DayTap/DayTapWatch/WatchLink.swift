@@ -1,6 +1,16 @@
 import Foundation
 import WatchConnectivity
 
+/// 一次重传的口径结果,给「再传一次」做明确反馈(#4):点了之后到底发生了什么。
+struct RetryResult {
+    /// 这次实际重新交给系统队列的条数。
+    let submitted: Int
+    /// 仍未被 iPhone 确认的条数(含系统队列中)。
+    let waiting: Int
+    /// 标记失败的条数。
+    let failed: Int
+}
+
 /// 手表 → iPhone 的文件桥。
 /// `transferFile` 会把文件放进系统队列：当时手机不在身边也会排队，靠近后再送。
 /// 这是 Apple 公开的配套 App 传文件方式（见 WWDC21《There and back again》）。模拟器传不成，要真机配对。
@@ -12,6 +22,10 @@ final class WatchLink: NSObject {
 
     /// 界面可读的一行状态。只在主线程改。
     private(set) var statusText = "结束后会传给 iPhone"
+
+    /// 传输计数(#4 闲时角标):待 iPhone 确认的条数与失败条数。只在主线程改。
+    private(set) var waitingCount = 0
+    private(set) var failedCount = 0
 
     var onChange: (() -> Void)?
 
@@ -43,12 +57,16 @@ final class WatchLink: NSObject {
     }
 
     /// 把还没被手机确认的本地文件再交一次。已经在系统队列里的不重复提交。
-    func retryPending(reason: String) {
-        guard WCSession.isSupported() else { return }
+    /// 返回口径结果(#4):调用方据此给触觉与明确文案,不再让点击像没反应。
+    @discardableResult
+    func retryPending(reason: String) -> RetryResult {
+        guard WCSession.isSupported() else {
+            return RetryResult(submitted: 0, waiting: waitingCount, failed: failedCount)
+        }
         let session = WCSession.default
         guard session.activationState == .activated else {
             setStatus("正在连接 iPhone…")
-            return
+            return RetryResult(submitted: 0, waiting: waitingCount, failed: failedCount)
         }
 
         reconcileOrphans()
@@ -57,6 +75,7 @@ final class WatchLink: NSObject {
             transfer.file.metadata?[TransferKeys.id] as? String
         })
 
+        var submitted = 0
         let now = Date()
         for record in library.snapshot() where record.awaitsPhoneAck {
             if outstanding.contains(record.id) {
@@ -71,8 +90,10 @@ final class WatchLink: NSObject {
                 continue
             }
             enqueue(record)
+            submitted += 1
         }
         refreshSummary(reachable: session.isReachable, reason: reason)
+        return RetryResult(submitted: submitted, waiting: waitingCount, failed: failedCount)
     }
 
     func enqueue(id: String) {
@@ -134,6 +155,8 @@ final class WatchLink: NSObject {
         let records = library.snapshot()
         let waiting = records.filter(\.awaitsPhoneAck).count
         let failed = records.filter { $0.state == .failed }.count
+        waitingCount = waiting
+        failedCount = failed
         let line: String
         if failed > 0 {
             line = "有 \(failed) 条没传出。靠近 iPhone 后会重试。"

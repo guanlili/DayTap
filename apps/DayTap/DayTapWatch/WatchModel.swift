@@ -25,6 +25,11 @@ final class WatchModel: ObservableObject {
     @Published var status = "点一下开始录音"
     /// 传输通道的一句话状态(待传/送出/已确认),闲时小字展示。
     @Published private(set) var linkStatus = ""
+    /// 传输计数(#4):待 iPhone 确认 / 失败条数,闲时角标。
+    @Published private(set) var transferWaiting = 0
+    @Published private(set) var transferFailed = 0
+    /// 最近一条失败的短原因(有失败才非 nil),角标下小字。
+    @Published private(set) var transferError: String?
     @Published private(set) var permissionDenied = false
 
     var isRecording: Bool { phase == .recording }
@@ -38,9 +43,10 @@ final class WatchModel: ObservableObject {
 
     private init() {
         link.onChange = { [weak self] in
-            self?.linkStatus = self?.link.statusText ?? ""
+            self?.syncTransferState()
         }
         linkStatus = link.statusText
+        syncTransferState()
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
@@ -89,9 +95,31 @@ final class WatchModel: ObservableObject {
     }
 
     /// 再交一次还没被 iPhone 确认的文件。不开麦。
+    /// #4:点击必给触觉 + 结果文案,不再让点了像没反应。
     func retry() {
         link.activate()
-        link.retryPending(reason: "manual")
+        let result = link.retryPending(reason: "manual")
+        syncTransferState()
+        WKInterfaceDevice.current().play(.click)
+        if result.failed > 0 {
+            status = "有 \(result.failed) 条没传出,靠近 iPhone 会自动重试"
+        } else if result.waiting > 0 {
+            status = result.submitted > 0
+                ? "已交 \(result.submitted) 条,共 \(result.waiting) 条等 iPhone 确认"
+                : "没有新的要交,\(result.waiting) 条仍在队列里"
+        } else {
+            status = "没有要重传的,iPhone 都已确认"
+        }
+    }
+
+    /// 从链路层同步一行状态与计数到发布属性。
+    private func syncTransferState() {
+        linkStatus = link.statusText
+        transferWaiting = link.waitingCount
+        transferFailed = link.failedCount
+        transferError = link.library.snapshot()
+            .first { $0.state == .failed && $0.lastError != nil }?
+            .lastError
     }
 
     /// AppIntent 专用:录错了直接丢弃这一条(不保存不传出),静默回闲。
