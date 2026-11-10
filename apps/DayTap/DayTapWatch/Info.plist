@@ -34,6 +34,6 @@
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
-	<string>com.chriscui.daytap</string>
+	<string>com.guanhongli.daytap</string>
 </dict>
 </plist>
