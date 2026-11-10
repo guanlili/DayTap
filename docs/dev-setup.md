@@ -18,6 +18,8 @@ plutil -lint apps/DayTap/DayTap.xcodeproj/project.pbxproj
 
 pbxproj 是 objectVersion 56 显式文件引用(非同步文件夹),**新增源文件要四处登记**(PBXBuildFile / PBXFileReference / 组 children / Sources phase),ID 照既有规律递增。这个文件坏过一次,改完必跑 `plutil -lint`。
 
+内嵌 appex(小组件扩展)的 CopyFiles phase:`dstSubfolderSpec = 13` 且 **`dstPath` 必须留空**——写成 `$(PLUGINS_FOLDER_PATH)` 会解析成相对构建目录的完整路径,叠出 `PlugIns/DayTap Watch App.app/PlugIns/appex` 双层嵌套(实测踩过)。
+
 ## 纪律与文档
 
 - **记账纪律见仓库根 CLAUDE.md / AGENTS.md(devledger)**:完成可交付单元的会话,结束前建 issue → 关闭 → 入 Project #18 → 设字段;commit 末尾带 `(#issue号)` 自动关联
