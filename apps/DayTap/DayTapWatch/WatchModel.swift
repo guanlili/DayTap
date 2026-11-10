@@ -28,6 +28,8 @@ final class WatchModel: ObservableObject {
     /// 传输计数(#4):待 iPhone 确认 / 失败条数,闲时角标。
     @Published private(set) var transferWaiting = 0
     @Published private(set) var transferFailed = 0
+    /// 待传占用(#22):还没传出去的录音在手表上共占多少,角标顺带显示。
+    @Published private(set) var transferBytes = 0
     /// 最近一条失败的短原因(有失败才非 nil),角标下小字。
     @Published private(set) var transferError: String?
     @Published private(set) var permissionDenied = false
@@ -120,6 +122,17 @@ final class WatchModel: ObservableObject {
         transferError = link.library.snapshot()
             .first { $0.state == .failed && $0.lastError != nil }?
             .lastError
+        transferBytes = link.library.snapshot()
+            .filter(\.awaitsPhoneAck)
+            .reduce(0) { $0 + $1.byteCount }
+    }
+
+    /// 丢弃全部待传(#22):录了不想传的,表上直接清掉。触觉+文案给明确反馈。
+    func discardPending() {
+        let count = link.discardPending()
+        WKInterfaceDevice.current().play(count > 0 ? .success : .click)
+        status = count > 0 ? "已丢弃 \(count) 条,不传 iPhone" : "没有待传的录音"
+        syncTransferState()
     }
 
     /// AppIntent 专用:录错了直接丢弃这一条(不保存不传出),静默回闲。

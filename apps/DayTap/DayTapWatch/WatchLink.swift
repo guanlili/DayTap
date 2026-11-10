@@ -105,6 +105,26 @@ final class WatchLink: NSObject {
         }
     }
 
+    /// 丢弃全部待传(#22):录了不想传的,直接在表上清掉——本地文件、索引、
+    /// 系统队列里还没送出的 transfer 一并撤。已确认的本就不在表上(确认即删)。
+    /// 已知边界:刚送出还在途的(didFinish 已回)无法撤回,极端竞态下 iPhone 仍可能收到。
+    @discardableResult
+    func discardPending() -> Int {
+        guard WCSession.isSupported() else { return 0 }
+        let session = WCSession.default
+        for transfer in session.outstandingFileTransfers {
+            transfer.cancel()
+        }
+        let pending = library.snapshot().filter(\.awaitsPhoneAck)
+        for record in pending {
+            clearSubmitted(record.id)
+            library.remove(id: record.id)
+        }
+        DayTapLog.link.info("discarded pending count=\(pending.count, privacy: .public)")
+        refreshSummary(reachable: session.isReachable, reason: "discard-pending")
+        return pending.count
+    }
+
     private func enqueue(_ record: RecordingRecord) {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default

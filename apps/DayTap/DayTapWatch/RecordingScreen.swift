@@ -7,6 +7,7 @@ import SwiftUI
 struct RecordingScreen: View {
     @ObservedObject var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var confirmDiscard = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -46,6 +47,19 @@ struct RecordingScreen: View {
                         .buttonStyle(.bordered)
                         .font(.caption2)
                         .accessibilityIdentifier("daytap.record.retry")
+
+                    // 待传才出现(#22):录了不想传的,表上直接清,不给 iPhone 知道。
+                    if model.transferWaiting > 0 {
+                        Button {
+                            confirmDiscard = true
+                        } label: {
+                            Label("丢弃待传 (\(model.transferWaiting))", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .font(.caption2)
+                        .accessibilityIdentifier("daytap.record.discard")
+                    }
                 }
             }
             .padding(.horizontal, 6)
@@ -55,6 +69,12 @@ struct RecordingScreen: View {
             .accessibilityIdentifier("daytap.record.toggle")
             .accessibilityLabel(model.phase == .recording ? "正在录音,点按停止并保存" : "录音,点按开始")
             .accessibilityAddTraits(.isButton)
+            .alert("丢弃待传录音?", isPresented: $confirmDiscard) {
+                Button("丢弃", role: .destructive) { model.discardPending() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("\(model.transferWaiting) 条不会传给 iPhone，手表上直接删除。")
+            }
         }
         .onAppear(perform: model.onAppear)
         .onChange(of: scenePhase) { _, phase in
@@ -80,7 +100,10 @@ struct RecordingScreen: View {
             VStack(spacing: 2) {
                 HStack(spacing: 8) {
                     if model.transferWaiting > 0 {
-                        Label("\(model.transferWaiting)", systemImage: "arrow.uturn.up")
+                        Label(
+                            "\(model.transferWaiting) 条 · \(DayTapFormat.bytes(model.transferBytes))",
+                            systemImage: "arrow.uturn.up"
+                        )
                     }
                     if model.transferFailed > 0 {
                         Label("\(model.transferFailed)", systemImage: "exclamationmark.triangle")
