@@ -70,7 +70,7 @@ final class WatchLink: NSObject {
         }
 
         reconcileOrphans()
-        purgeAcknowledged()
+        purgeSettled()
 
         let outstanding = Set(session.outstandingFileTransfers.compactMap { transfer -> String? in
             transfer.file.metadata?[TransferKeys.id] as? String
@@ -126,16 +126,25 @@ final class WatchLink: NSObject {
         DayTapLog.link.info("transferFile queued \(record.id, privacy: .public) reachable=\(session.isReachable)")
     }
 
-    /// 确认即删(#21 方案A):iPhone 已确认落盘的原件与索引一并清掉,
-    /// 手表只当采集器,存储不随时间膨胀。旧版本只标记不删,这里顺带清历史积压。
-    /// 底线不动:没被确认的(awaiting ack/失败)绝不删。
-    private func purgeAcknowledged() {
-        let acked = library.snapshot().filter { $0.state == .acknowledged }
-        guard !acked.isEmpty else { return }
-        for record in acked {
+    /// 清理已落定的本地记录(#21 方案A):
+    /// ① iPhone 已确认的——原件与索引一并清,手表只当采集器,存储不随时间膨胀
+    ///   (旧版本只标记不删,这里顺带清历史积压);
+    /// ② 失败且文件已不存在的死条目——永远传不走,留着只会一直挂在角标里。
+    /// 底线不动:只要文件还在且未被确认(待传/队列/失败),就保留等待重传。
+    private func purgeSettled() {
+        let settled = library.snapshot().filter { record in
+            if record.state == .acknowledged { return true }
+            if record.state == .failed,
+               !FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path) {
+                return true
+            }
+            return false
+        }
+        guard !settled.isEmpty else { return }
+        for record in settled {
             library.remove(id: record.id)
         }
-        DayTapLog.link.info("purged acknowledged count=\(acked.count, privacy: .public)")
+        DayTapLog.link.info("purged settled count=\(settled.count, privacy: .public)")
     }
 
     /// 崩溃或被系统杀掉时，目录里可能有 m4a 但索引没有。补一条待传记录。
