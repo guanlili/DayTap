@@ -2,7 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// iPhone 上的收件箱。不做录音。
-/// 转文字：点「转文字」用系统语音识别在本机出全文，全文进 sheet 查看、复制、分享。
+/// 转文字(#30 零步化)：录音到位自动转全文(电量护栏在 Transcriber)；行内常显首行预览、
+/// 点预览开全文 sheet，长按「复制文字」一步复制；手动转写留作兜底。
 /// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
 /// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
 /// #15 重设计:首屏只留录音本身——指南收进工具栏 ⓘ sheet,状态「出问题才说话」。
@@ -542,7 +543,17 @@ struct RecordingListView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if let snippet = transcriptSnippet(record) {
+                // 预览位(#30):正在转→轻提示;搜索命中→高亮+跳播(#32 不变);
+                // 平时→首行常显,点它看全文(看全文从两次手势降为一步)。
+                if transcriber.activeID == record.id {
+                    HStack(spacing: 5) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("转写中…")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                } else if let snippet = transcriptSnippet(record) {
                     Button {
                         playFromHit(record, offset: snippet.offset)
                     } label: {
@@ -556,6 +567,18 @@ struct RecordingListView: View {
                     .buttonStyle(.borderless)
                     .accessibilityLabel("跳到命中处播放")
                     .accessibilityIdentifier("daytap.search.hit.\(record.id)")
+                } else if let text = record.transcript {
+                    Button {
+                        transcriptRecord = record
+                    } label: {
+                        Text(text)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("查看全文")
+                    .accessibilityIdentifier("daytap.preview.\(record.id)")
                 }
 
                 if active {
@@ -607,6 +630,14 @@ struct RecordingListView: View {
                 Label("查看全文", systemImage: "text.quote")
             }
             .accessibilityIdentifier("daytap.transcript.\(record.id)")
+
+            // #30 一键复制:不进 sheet 直接把全文放进剪贴板。
+            Button {
+                copyTranscript(record)
+            } label: {
+                Label("复制文字", systemImage: "doc.on.doc")
+            }
+            .accessibilityIdentifier("daytap.copyText.\(record.id)")
         } else if fileExists {
             Button {
                 transcriber.transcribe(record)
@@ -653,6 +684,13 @@ struct RecordingListView: View {
             return
         }
         player.toggle(record, fileURL: library.fileURL(id: record.id))
+    }
+
+    /// 长按「复制文字」(#30):全文直接进剪贴板,触感轻确认,不开 sheet 不占 banner。
+    private func copyTranscript(_ record: RecordingRecord) {
+        guard let text = record.transcript else { return }
+        UIPasteboard.general.string = text
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     /// 落删(#20):删的是正在播的先停播,再清索引+文件并记入防复活名单。
@@ -706,13 +744,12 @@ struct RecordingListView: View {
         // 数字日期比「2026年11月10日」短一截,转写过的行才不至于折成两行(#19)。
         let date = record.createdAt.formatted(date: .numeric, time: .shortened)
         // 空壳文件(只有容器头)直接标出来,别让用户点开才发现播不了;
-        // 正常条目带「已转文字」标记;手机录的标来源(#3)。byteCount 已按真实落盘大小;
+        // 手机录的标来源(#3)。byteCount 已按真实落盘大小;
         // 不写 m4a——条条都是,语音备忘录也不标格式,格式知识在指南里(#19)。
+        // 转没转过不再标「已转文字」——行内预览常显本身就是状态(#30)。
         var mark = record.origin == "phone" ? "手机录 · " : ""
         if record.byteCount < 1024 {
             mark += "空录音 · "
-        } else if record.transcript != nil {
-            mark += "已转文字 · "
         }
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount))"
         // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
@@ -1036,7 +1073,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "text.bubble",
                         title: "转文字 · 自动出全文",
-                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。全文可搜索、可复制分享。"
+                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写好的行内直接显示首行文字，点它看全文，长按「复制文字」一步复制；全文可搜索。"
                     )
                     guideRow(
                         icon: "text.quote",
