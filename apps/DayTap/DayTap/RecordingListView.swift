@@ -660,7 +660,8 @@ struct RecordingListView: View {
                     .buttonStyle(.borderless)
                     .accessibilityLabel("跳到命中处播放")
                     .accessibilityIdentifier("daytap.search.hit.\(record.id)")
-                } else if let text = record.transcript {
+                } else if let text = record.summary ?? record.transcript {
+                    // 有摘要先摘要(#35):比转写首句更短更准;没有退转写首行(#30)。
                     Button {
                         transcriptRecord = record
                     } label: {
@@ -869,10 +870,13 @@ struct RecordingListView: View {
         player.rate == 1.5 ? "1.5x" : (player.rate == 2.0 ? "2x" : "1x")
     }
 
-    /// 行标题(#29):起过名用名字;没起名只显时刻——日期已上移到分组头。
+    /// 行标题(#29→#36):手动名 > 自动短标题 > 时刻;日期已上移到分组头,手动名永远赢。
     private func displayTitle(_ record: RecordingRecord) -> String {
         if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             return name
+        }
+        if let auto = record.autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !auto.isEmpty {
+            return auto
         }
         return record.createdAt.formatted(date: .omitted, time: .shortened)
     }
@@ -894,8 +898,10 @@ struct RecordingListView: View {
             mark += "空录音 · "
         }
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount))"
-        // 起了名的条目,标题已经是名字,这里补回时刻;没起名的避免时刻出现两遍。
-        if record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+        // 标题已是内容的条目(手动名/自动短标题),这里补回时刻;纯时刻标题避免时刻出现两遍(#36)。
+        let titled = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || record.autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        if titled {
             return "\(time) · \(mark)\(size)"
         }
         return mark + size
@@ -944,14 +950,20 @@ private struct TranscriptView: View {
         NavigationStack {
             Group {
                 if let segments = record?.transcriptSegments, !segments.isEmpty {
-                    segmentList(segments)
+                    VStack(spacing: 0) {
+                        digestCard
+                        segmentList(segments)
+                    }
                 } else if let text = record?.transcript {
                     ScrollView {
-                        Text(text)
-                            .font(.body)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
+                        VStack(alignment: .leading, spacing: 0) {
+                            digestCard
+                            Text(text)
+                                .font(.body)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
+                        }
                     }
                 } else if transcriber.activeID == recordID {
                     ProgressView("正在转写…")
@@ -981,6 +993,16 @@ private struct TranscriptView: View {
                 }
                 ToolbarItem(placement: .bottomBar) {
                     HStack {
+                        if digestCardText != nil {
+                            Button {
+                                UIPasteboard.general.string = digestCardText
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            } label: {
+                                Label("复制卡片", systemImage: "checklist")
+                            }
+                            .accessibilityIdentifier("daytap.digest.copy")
+                        }
+
                         Button {
                             UIPasteboard.general.string = record?.transcript
                         } label: {
@@ -995,6 +1017,57 @@ private struct TranscriptView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 摘要卡(#35)
+
+    /// 全文页顶部的「决策卡」:摘要+待办,转写完本机自动出;没有就整卡不占位。
+    @ViewBuilder
+    private var digestCard: some View {
+        if record?.summary != nil || record?.actionItems != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                if let summary = record?.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.subheadline)
+                }
+                if let actions = record?.actionItems, !actions.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(actions, id: \.self) { item in
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Image(systemName: "circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.accentColor)
+                                Text(item)
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .accessibilityIdentifier("daytap.digest.card")
+        }
+    }
+
+    /// 「复制卡片」的文本(#35):【摘要】+【待办】清单;两样都没有则按钮不出现。
+    private var digestCardText: String? {
+        guard let record else { return nil }
+        var parts: [String] = []
+        if let summary = record.summary, !summary.isEmpty {
+            parts.append("【摘要】\(summary)")
+        }
+        if let actions = record.actionItems, !actions.isEmpty {
+            parts.append("【待办】\n" + actions.map { "· \($0)" }.joined(separator: "\n"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
     // MARK: - 时间戳分段(#32)
@@ -1199,7 +1272,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "calendar",
                         title: "按天浏览 · 类别筛选",
-                        detail: "列表自动按天分组（今天 / 昨天 / 日期）；转写完成后自动归入 会议 / 活动 / 灵感 / 日常 / 其他，长按「类别」可改；顶部按类别一键筛选。"
+                        detail: "列表自动按天分组（今天 / 昨天 / 日期），没起名的录音转写后会自动起内容短标题；转写完成后自动归入 会议 / 活动 / 灵感 / 日常 / 其他，长按「类别」可改；顶部按类别一键筛选。"
                     )
                 }
 
@@ -1220,7 +1293,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "text.bubble",
                         title: "转文字 · 自动出全文",
-                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写好的行内直接显示首行文字，点它看全文，长按「复制文字」一步复制；全文可搜索。"
+                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写完本机自动出短标题、摘要和待办——列表标题与全文页顶部的卡片直接可用。转写好的行内直接显示摘要（或首行文字），点它看全文，长按「复制文字」一步复制；全文可搜索。"
                     )
                     guideRow(
                         icon: "text.quote",

@@ -50,6 +50,14 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 主体类别(#29):nil=未分类(还没转写/判不出/被手动清除)。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机端本地判定,预设见 RecordingCategory)。
     var category: String? = nil
+    /// 转写摘要(#35):本机 Foundation Models 出的 ≤3 句摘要。派生内容,重新转写会重生成。
+    /// 可选字段,旧 index 解码 nil 兼容;不进手表协议。
+    var summary: String? = nil
+    /// 摘要卡待办清单(#35):每条一行短句。派生内容,同 summary 口径。
+    var actionItems: [String]? = nil
+    /// 自动内容短标题(#36):≤12 字,转写完由摘要链路顺手生成;展示优先级 手动名>autoTitle>时刻。
+    /// 可选字段,兼容同上;不进手表协议(手表自己的索引永远没有它)。
+    var autoTitle: String? = nil
 
     /// 列表标题:起了名用名字,没起名用时间。
     var title: String {

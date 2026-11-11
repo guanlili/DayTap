@@ -181,47 +181,85 @@ final class TranscriptionCenter: ObservableObject {
         let trimmed = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
         fresh.transcript = trimmed.isEmpty ? nil : trimmed
         fresh.transcriptSegments = trimmed.isEmpty || segments.isEmpty ? nil : segments
-        // 转写完顺手归类(#29):本机 Foundation Models 判一个预设类别;
-        // 已有类别不覆盖(用户纠过偏);判不出/模型不可用→留未分类,不影响转写落库。
-        if fresh.transcript != nil, fresh.category == nil {
-            fresh.category = await classify(transcript: trimmed)
+        // 转写完顺手出摘要卡(#35)+短标题(#36)+类别(#29):一次调用三件事;
+        // 类别被用户纠偏过的不覆盖;摘要/标题是派生内容,重新转写就重生成;
+        // 模型不可用→全留 nil(未分类/时刻名),不影响转写落库。
+        if fresh.transcript != nil,
+           fresh.category == nil || fresh.summary == nil || fresh.autoTitle == nil {
+            let result = await digest(transcript: trimmed)
+            if fresh.category == nil {
+                fresh.category = result?.category
+            }
+            fresh.autoTitle = result?.title
+            fresh.summary = result?.summary
+            fresh.actionItems = result?.actions
         }
         fresh.updatedAt = Date()
         library.upsert(fresh)
-        DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public) category=\(fresh.category ?? "-", privacy: .public)")
+        DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public) category=\(fresh.category ?? "-", privacy: .public) autoTitle=\(fresh.autoTitle ?? "-", privacy: .public) hasSummary=\(fresh.summary != nil)")
     }
 
-    // MARK: - 自动归类(#29)
+    // MARK: - 摘要卡与自动归类(#35/#36/#29)
 
-    /// Foundation Models 本机判一个预设类别:零用户成本、不出设备、不花钱。
-    /// 任何失败(模型不可用/答非预设/超时)都返回 nil 留「未分类」,绝不拖垮转写本体。
-    private func classify(transcript: String) async -> String? {
+    /// digest() 的规整结果:字段级可空——模型某件没办好不连坐其它件。
+    private struct DigestResult {
+        var category: String?
+        var title: String?
+        var summary: String?
+        var actions: [String]?
+    }
+
+    private func digest(transcript: String) async -> DigestResult? {
         guard !transcript.isEmpty else { return nil }
         let model = SystemLanguageModel.default
         guard model.isAvailable else {
-            DayTapLog.transcribe.info("classify skipped: foundation models unavailable")
+            DayTapLog.transcribe.info("digest skipped: foundation models unavailable")
             return nil
         }
-        let list = RecordingCategory.presets.joined(separator: "、")
         let session = LanguageModelSession(
             model: model,
-            instructions: "你给中文语音录音分类。只从这些类别里选一个最贴切的:\(list)。只回答类别名本身,不要任何解释、标点或其他文字。"
+            instructions: "你整理中文语音录音的转写全文。只依据全文内容作答,用简体中文,不要发明全文里没有的信息。"
         )
         do {
             let response = try await session.respond(
-                to: "转写全文如下:\n\(String(transcript.prefix(4000)))"
+                to: "转写全文如下:\n\(String(transcript.prefix(4000)))",
+                generating: RecordingDigest.self
             )
-            let answer = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hit = RecordingCategory.presets.first { answer.contains($0) }
-            if hit == nil {
-                DayTapLog.transcribe.info("classify unmatched answer \(answer.prefix(20), privacy: .public)")
+            let raw = response.content
+            let category = RecordingCategory.presets.first { raw.category.contains($0) }
+            let title = raw.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let summary = raw.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actions = raw.actionItems
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if category == nil {
+                DayTapLog.transcribe.info("digest unmatched category \(raw.category.prefix(10), privacy: .public)")
             }
-            return hit
+            return DigestResult(
+                category: category,
+                title: title.isEmpty ? nil : String(title.prefix(12)),
+                summary: summary.isEmpty ? nil : summary,
+                actions: actions.isEmpty ? nil : actions
+            )
         } catch {
-            DayTapLog.transcribe.info("classify failed \(error.localizedDescription, privacy: .public)")
+            DayTapLog.transcribe.info("digest failed \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
+}
+
+/// @Generable 的结构化输出(#35/#36/#29):一次模型调用产出 类别+短标题+摘要+待办。
+/// 宏生成的 init 扩展要求类型非 private,故置于文件级。
+@Generable
+struct RecordingDigest {
+    @Guide(description: "最贴切的类别,必须恰好是:会议、活动、灵感、日常、其他 五个词之一")
+    var category: String
+    @Guide(description: "内容短标题,不超过12个字,不要句号等结尾标点")
+    var title: String
+    @Guide(description: "内容摘要,不超过三句话")
+    var summary: String
+    @Guide(description: "录音里提到的待办事项,每条一句话;没有待办就给空列表")
+    var actionItems: [String]
 }
 
 enum TranscriptionError: LocalizedError {
