@@ -185,18 +185,21 @@ extension PhoneLink: WCSessionDelegate {
         let receivedSize = (try? FileManager.default.attributesOfItem(atPath: file.fileURL.path)[.size] as? Int) ?? 0
         if bytes >= 1024, receivedSize < bytes * 9 / 10 {
             DayTapLog.library.error("truncated arrival \(id, privacy: .public) expected=\(bytes, privacy: .public) got=\(receivedSize, privacy: .public); not acked")
-            // 之前落下的坏副本要清位:importAudio 见目标存在会跳过复制,坏文件会永远挡住重传。
-            let destination = library.fileURL(id: id)
-            if let existing = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int,
-               existing < bytes * 9 / 10 {
-                try? FileManager.default.removeItem(at: destination)
-            }
             // 拒收必须可见(#48 修正):publish 的文案只在「未连接」卡里渲染,连接正常时整条吞掉——
             // 用户看到的就是"手机没反应"。改走通知进列表页 banner,带应/实收数字。
             let message = "一条录音传输不完整（\(DayTapFormat.clock(duration))，应 \(DayTapFormat.bytes(bytes)) 实收 \(DayTapFormat.bytes(receivedSize))）——已拒收，原件在手表会重试"
             publish(status: message, ready: true)
             NotificationCenter.default.post(name: .daytapTransferRejected, object: message)
             return
+        }
+        // 历史空壳让位(#48 收尾):完好的来件若撞上此前落盘的截断坏副本,importAudio 的
+        // 「目标存在即跳过复制」会保壳拒新、照回执——手表删原件,好数据被空壳吃掉。
+        // 进门先验既有副本:不达标就让位,好件落位后同 id 行原地痊愈(byteCount/转写全刷新)。
+        let destination = library.fileURL(id: id)
+        if let existing = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int,
+           bytes >= 1024, existing < bytes * 9 / 10 {
+            try? FileManager.default.removeItem(at: destination)
+            DayTapLog.library.info("cleared stale shell \(id, privacy: .public) (\(existing, privacy: .public)B) for good arrival")
         }
         let saved = library.importAudio(from: file.fileURL, record: record)
         if saved {
