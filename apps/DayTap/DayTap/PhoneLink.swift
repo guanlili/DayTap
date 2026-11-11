@@ -75,6 +75,18 @@ final class PhoneLink: NSObject, ObservableObject {
         library.remove(id: id)
     }
 
+    /// 从回收站恢复(#54):除了清 deletedAt,还要解防复活名单——否则手表重传的好件
+    /// (比如来替换截断空壳的完整版)会被名单拦下+回执,原件反被这个流程删掉。
+    func restore(id: String) {
+        var ids = UserDefaults.standard.stringArray(forKey: Self.deletedIDsKey) ?? []
+        if let index = ids.firstIndex(of: id) {
+            ids.remove(at: index)
+            UserDefaults.standard.set(ids, forKey: Self.deletedIDsKey)
+            DayTapLog.link.info("unblocked deleted id \(id, privacy: .public) on restore")
+        }
+        library.restore(id: id)
+    }
+
     func activate() {
         guard WCSession.isSupported() else {
             publish(status: "这台 iPhone 不支持与手表连接", ready: false)

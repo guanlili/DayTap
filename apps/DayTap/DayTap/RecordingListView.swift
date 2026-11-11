@@ -1302,7 +1302,7 @@ private struct TrashView: View {
                     .padding(.vertical, 2)
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         Button {
-                            library.restore(id: record.id)
+                            PhoneLink.shared.restore(id: record.id)
                         } label: {
                             Label("恢复", systemImage: "arrow.uturn.backward")
                         }
