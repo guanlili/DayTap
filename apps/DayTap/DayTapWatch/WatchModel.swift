@@ -191,7 +191,9 @@ final class WatchModel: ObservableObject {
             self.level = 0
             self.phase = .recording
             self.permissionDenied = false
-            // #24:录音态界面(红点/计时/音量条/停止键)自解释,不再配说明文案。
+            // #24:录音态界面(红点/计时/音量条/停止键)自解释,不再配说明文案;
+            // #28:开录即清上一条瞬态提示(「已丢弃/空录音」不该跨事件常驻)。
+            self.status = ""
             WKInterfaceDevice.current().play(.start)
             self.startTimer()
         }

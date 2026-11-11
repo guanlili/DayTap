@@ -26,6 +26,12 @@ final class KnockDetector: ObservableObject {
     var onTrigger: (() -> Void)?
 
     private let manager = CMMotionManager()
+    /// 串行队列:加速度计回调若落进并发 OperationQueue,峰检测状态可能被并发改写(#28)。
+    private let sampleQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
     private var lastPeakAt: CFTimeInterval?
     private var belowQuiet = true
     private var cooldownUntil = Date.distantPast
@@ -37,7 +43,7 @@ final class KnockDetector: ObservableObject {
         belowQuiet = true
         lastPeakAt = nil
         manager.accelerometerUpdateInterval = 1.0 / 100.0
-        manager.startAccelerometerUpdates(to: OperationQueue()) { [weak self] data, _ in
+        manager.startAccelerometerUpdates(to: sampleQueue) { [weak self] data, _ in
             guard let self, let data else { return }
             self.sample(magnitude: magnitude(of: data.acceleration), at: data.timestamp)
         }

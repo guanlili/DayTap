@@ -38,11 +38,17 @@ final class PlaybackCenter: ObservableObject {
     private func start(record: RecordingRecord, fileURL: URL) {
         reset()
         let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
-        } catch {
-            DayTapLog.library.error("playback session failed \(error.localizedDescription, privacy: .public)")
+        // 激活失败重试一次(#28):曾出现「界面在播但无声」的一次性抖动,
+        // 会话没激活成功时 play() 只是空转;失败两次才放弃并落日志。
+        var activated = false
+        for _ in 0..<2 where !activated {
+            do {
+                try session.setCategory(.playback, mode: .default, options: [])
+                try session.setActive(true)
+                activated = true
+            } catch {
+                DayTapLog.library.error("playback session failed \(error.localizedDescription, privacy: .public)")
+            }
         }
         guard let newPlayer = try? AVAudioPlayer(contentsOf: fileURL) else {
             DayTapLog.library.error("playback load failed \(record.id, privacy: .public)")
@@ -53,7 +59,11 @@ final class PlaybackCenter: ObservableObject {
         loadError = nil
         newPlayer.enableRate = true
         newPlayer.rate = rate
-        newPlayer.play()
+        guard activated, newPlayer.play() else {
+            DayTapLog.library.error("playback failed to start \(record.id, privacy: .public)")
+            loadError = "没法开始播放（音频会话没就绪）。再点一次试试。"
+            return
+        }
         player = newPlayer
         playingID = record.id
         isPlaying = true

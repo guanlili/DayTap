@@ -18,6 +18,30 @@ final class PhoneRecorder: ObservableObject {
     private var timer: Timer?
     private var startedAt: Date?
     private var recordingID: String?
+    private var interruptionObserver: NSObjectProtocol?
+
+    init() {
+        // 来电/闹钟抢麦克风时,系统会停掉录音器——主动收尾入库,
+        // 不让计时器空转误导(#28,同手表 handleInterruption 口径)。
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor [weak self] in
+                guard let self, self.isRecording else { return }
+                let raw = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue
+                guard raw == nil || raw == AVAudioSession.InterruptionType.began.rawValue else { return }
+                self.finish(reason: "录音被打断，已保存")
+            }
+        }
+    }
+
+    deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+    }
 
     /// 底栏红钮:闲→开录,录→停存。与手表 toggle() 同语义。
     func toggle() {
@@ -73,7 +97,8 @@ final class PhoneRecorder: ObservableObject {
     }
 
     /// 停录入库;空壳(<1KB 容器头)直接丢弃,口径同手表(#17)。
-    private func finish() {
+    /// reason 非空=被打断等异常收尾,界面留一句说明(#28)。
+    private func finish(reason: String? = nil) {
         let duration = capture.stop() ?? elapsed
         stopTimer()
         let id = recordingID
@@ -81,6 +106,7 @@ final class PhoneRecorder: ObservableObject {
         isRecording = false
         recordingID = nil
         startedAt = nil
+        statusText = reason
         guard let id, let beganAt else { return }
 
         let url = FileManager.default.temporaryDirectory

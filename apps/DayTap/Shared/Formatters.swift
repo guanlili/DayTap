@@ -1,9 +1,12 @@
 import Foundation
 
 enum DayTapFormat {
-    /// 录音计时，例如 `12:05`。
+    /// 录音计时，例如 `12:05`；满一小时升为 `1:02:03`（#28，长会议回读）。
     static func clock(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds.rounded(.down)))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
