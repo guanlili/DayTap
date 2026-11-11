@@ -60,7 +60,14 @@ final class WatchLink: NSObject {
     /// 返回口径结果(#4):调用方据此给触觉与明确文案,不再让点击像没反应。
     @discardableResult
     func retryPending(reason: String) -> RetryResult {
+        // 本地整理不依赖会话状态:孤儿回收与已确认清账在任何状态下都先跑,
+        // 不再被激活守卫挡住(#13 发现、#27 修)——崩溃孤儿与历史积压
+        // 即使会话没激活也该入册/出册,计数立即可见。
+        reconcileOrphans()
+        purgeSettled()
+
         guard WCSession.isSupported() else {
+            setStatus("这只手表不能连接 iPhone")
             return RetryResult(submitted: 0, waiting: waitingCount, failed: failedCount)
         }
         let session = WCSession.default
@@ -68,9 +75,6 @@ final class WatchLink: NSObject {
             setStatus("正在连接 iPhone…")
             return RetryResult(submitted: 0, waiting: waitingCount, failed: failedCount)
         }
-
-        reconcileOrphans()
-        purgeSettled()
 
         let outstanding = Set(session.outstandingFileTransfers.compactMap { transfer -> String? in
             transfer.file.metadata?[TransferKeys.id] as? String
