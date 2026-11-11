@@ -213,7 +213,7 @@ struct RecordingListView: View {
             Text("手机上的音频与索引会一并删除，不可恢复。")
         }
         .sheet(isPresented: $showGuide) {
-            GuideSheet()
+            GuideSheet(transcriber: transcriber)
         }
     }
 
@@ -1321,7 +1321,9 @@ private struct TrashView: View {
 
 /// 使用指南(#15):原首屏文字墙收纳于此,内容一字不丢,只换排版。
 private struct GuideSheet: View {
+    @ObservedObject var transcriber: TranscriptionCenter
     @Environment(\.dismiss) private var dismiss
+    @State private var showCloudDigestSettings = false
 
     var body: some View {
         NavigationStack {
@@ -1374,8 +1376,18 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "text.bubble",
                         title: "转文字 · 自动出全文",
-                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写完本机自动出短标题、摘要和待办——列表标题与全文页顶部的卡片直接可用。转写好的行内直接显示摘要（或首行文字），点它看全文，长按「复制文字」一步复制；全文可搜索。"
+                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写完自动出短标题、摘要和待办——列表标题与全文页顶部的卡片直接可用。转写好的行内直接显示摘要（或首行文字），点它看全文，长按「复制文字」一步复制；全文可搜索。"
                     )
+                    // 云端摘要兜底(#39):国行无 Apple 智能,这里进设置自备接口。
+                    Button {
+                        showCloudDigestSettings = true
+                    } label: {
+                        Label(
+                            CloudDigestSettings.enabled ? "云端摘要 · 已启用" : "云端摘要 · 可选兜底",
+                            systemImage: "cloud"
+                        )
+                    }
+                    .accessibilityIdentifier("daytap.cloud.settings")
                     guideRow(
                         icon: "text.quote",
                         title: "Track 1 · 转写后贴给 Bot",
@@ -1416,10 +1428,84 @@ private struct GuideSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .sheet(isPresented: $showCloudDigestSettings) {
+                CloudDigestSettingsSheet(transcriber: transcriber)
+            }
         }
     }
 
-    private func guideRow(icon: String, title: String, detail: String? = nil) -> some View {
+/// 云端摘要设置(#39):国行无 Apple 智能时的可选兜底,OpenAI 兼容自备接口;
+/// key 进 Keychain;隐私口径=默认关,开了才发送,且页面明示「转写文字会发出去」。
+private struct CloudDigestSettingsSheet: View {
+    @ObservedObject var transcriber: TranscriptionCenter
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var enabled = CloudDigestSettings.enabled
+    @State private var baseURL = CloudDigestSettings.baseURL
+    @State private var model = CloudDigestSettings.model
+    @State private var apiKey = CloudDigestSecrets.loadKey() ?? ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("启用云端摘要", isOn: $enabled)
+                } footer: {
+                    Text("本机 Apple 智能不可用时的可选兜底（国行 iPhone 目前不支持）。本机可用时始终优先本机；启用后，转写文字将发送到你配置的服务生成摘要/标题/类别。")
+                }
+
+                Section("接口（OpenAI 兼容）") {
+                    TextField("Base URL", text: $baseURL, prompt: Text("如 https://open.bigmodel.cn/api/paas/v4"))
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("模型", text: $model, prompt: Text("如 glm-4-flash"))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("API Key", text: $apiKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+
+                Section {
+                    Button {
+                        transcriber.backfillDigests()
+                    } label: {
+                        if transcriber.backfillRunning {
+                            Text("补生成中 \(transcriber.backfillDone)/\(transcriber.backfillTotal)…")
+                        } else {
+                            let count = transcriber.backfillCandidateCount
+                            Text(count > 0 ? "为现有转写补生成摘要（\(count) 条）" : "没有需要补的录音")
+                        }
+                    }
+                    .disabled(transcriber.backfillRunning || !enabled)
+                } footer: {
+                    Text("为已转写但还没有摘要/类别的录音串行补生成（先保存配置）。")
+                }
+            }
+            .navigationTitle("云端摘要")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") {
+                        let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+                        UserDefaults.standard.set(enabled, forKey: CloudDigestSettings.enabledKey)
+                        UserDefaults.standard.set(trimmedBase, forKey: CloudDigestSettings.baseURLKey)
+                        UserDefaults.standard.set(trimmedModel, forKey: CloudDigestSettings.modelKey)
+                        CloudDigestSecrets.saveKey(apiKey)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func guideRow(icon: String, title: String, detail: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.body.weight(.medium))

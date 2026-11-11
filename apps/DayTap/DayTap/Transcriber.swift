@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import Foundation
 import FoundationModels
+import Security
 import Speech
 import UIKit
 
@@ -199,7 +200,7 @@ final class TranscriptionCenter: ObservableObject {
         DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public) category=\(fresh.category ?? "-", privacy: .public) autoTitle=\(fresh.autoTitle ?? "-", privacy: .public) hasSummary=\(fresh.summary != nil)")
     }
 
-    // MARK: - 摘要卡与自动归类(#35/#36/#29)
+    // MARK: - 摘要卡与自动归类(#35/#36/#29) + 云端兜底(#39)
 
     /// digest() 的规整结果:字段级可空——模型某件没办好不连坐其它件。
     private struct DigestResult {
@@ -209,13 +210,33 @@ final class TranscriptionCenter: ObservableObject {
         var actions: [String]?
     }
 
+    /// 三级瀑布(#39):本机 Foundation Models(可用必优先)→ 云端(已配置)→ 留空+状态卡说明。
+    /// 国行 iPhone 无 Apple 智能,云端是主力用户实际吃到摘要卡的路径。
     private func digest(transcript: String) async -> DigestResult? {
         guard !transcript.isEmpty else { return nil }
         let model = SystemLanguageModel.default
-        guard model.isAvailable else {
-            DayTapLog.transcribe.info("digest skipped: foundation models unavailable")
+        if model.isAvailable, let result = await onDeviceDigest(transcript: transcript, model: model) {
+            return result
+        }
+        if CloudDigestSettings.isConfigured, let result = await cloudDigest(transcript: transcript) {
+            return result
+        }
+        if !model.isAvailable, !CloudDigestSettings.isConfigured {
+            // 不可用不是错误但也不能永远无声(实测曾 35 条静默跳过无人察觉),状态卡说一句;
+            // 云端已配置且已报过具体错误的,不在这里用泛化提示覆盖。
+            if case .unavailable(let reason) = model.availability {
+                DayTapLog.transcribe.info("digest unavailable: \(String(describing: reason), privacy: .public)")
+            }
+            statusText = CloudDigestSettings.enabled
+                ? "转写完成；云端摘要未配全（Base URL / 模型 / API Key），未生成摘要/标题/类别"
+                : "转写完成；本机 Apple 智能不可用，未生成摘要/标题/类别（可在使用指南中配置云端摘要）"
             return nil
         }
+        // 本机可用但失败且云端未配:错误已在 onDeviceDigest 的 catch 里报过,不重复。
+        return nil
+    }
+
+    private func onDeviceDigest(transcript: String, model: SystemLanguageModel) async -> DigestResult? {
         let session = LanguageModelSession(
             model: model,
             instructions: "你整理中文语音录音的转写全文。只依据全文内容作答,用简体中文,不要发明全文里没有的信息。"
@@ -243,7 +264,131 @@ final class TranscriptionCenter: ObservableObject {
             )
         } catch {
             DayTapLog.transcribe.info("digest failed \(error.localizedDescription, privacy: .public)")
+            // 摘要失败不拖垮转写,但要让人看见——静默降级曾让问题长期隐形。
+            statusText = "摘要生成失败：\(error.localizedDescription)（转写不受影响）"
             return nil
+        }
+    }
+
+    /// OpenAI 兼容接口出摘要(#39):转写前 4000 字发送到用户自配的 base_url,隐私在设置页明示。
+    private func cloudDigest(transcript: String) async -> DigestResult? {
+        let base = CloudDigestSettings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/chat/completions"),
+              let key = CloudDigestSecrets.loadKey()
+        else {
+            statusText = "云端摘要配置无效（Base URL 或 API Key），转写不受影响"
+            return nil
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": CloudDigestSettings.model.trimmingCharacters(in: .whitespacesAndNewlines),
+            "temperature": 0.2,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(字符串数组,全文提到的待办事项,每条一句,没有则空数组)。"
+                ],
+                ["role": "user", "content": String(transcript.prefix(4000))]
+            ]
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                DayTapLog.transcribe.info("cloud digest HTTP \(http.statusCode, privacy: .public)")
+                statusText = "云端摘要失败：HTTP \(http.statusCode)（转写不受影响）"
+                return nil
+            }
+            struct ChatResponse: Decodable {
+                struct Choice: Decodable {
+                    struct Message: Decodable { var content: String? }
+                    var message: Message
+                }
+                var choices: [Choice]
+            }
+            struct Payload: Decodable {
+                var category: String?
+                var title: String?
+                var summary: String?
+                var actionItems: [String]?
+            }
+            let chat = try JSONDecoder().decode(ChatResponse.self, from: data)
+            let text = (chat.choices.first?.message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
+            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
+                DayTapLog.transcribe.info("cloud digest no json in reply")
+                statusText = "云端摘要失败：回复不是有效 JSON（转写不受影响）"
+                return nil
+            }
+            let payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
+            let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
+            let actions = (payload.actionItems ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return DigestResult(
+                category: category,
+                title: payload.title.flatMap { $0.isEmpty ? nil : String($0.prefix(12)) },
+                summary: payload.summary.flatMap { $0.isEmpty ? nil : $0 },
+                actions: actions.isEmpty ? nil : actions
+            )
+        } catch {
+            DayTapLog.transcribe.info("cloud digest failed \(error.localizedDescription, privacy: .public)")
+            statusText = "云端摘要失败：\(error.localizedDescription)（转写不受影响）"
+            return nil
+        }
+    }
+
+    // MARK: - 存量补跑(#39)
+
+    /// 补跑候选:在列、已转写、既无摘要卡也无类别(新录音走转写链路,不进这里)。
+    var backfillCandidateCount: Int {
+        library.snapshot().filter { record in
+            record.deletedAt == nil && record.transcript != nil
+                && record.summary == nil && record.category == nil
+        }.count
+    }
+
+    @Published private(set) var backfillRunning = false
+    @Published private(set) var backfillDone = 0
+    @Published private(set) var backfillTotal = 0
+
+    /// 设置页一键补跑:串行过候选,digest 瀑布本机优先;失败条目跳过不中断。
+    func backfillDigests() {
+        guard activeID == nil, !backfillRunning else {
+            statusText = "正在转写，稍后再补"
+            return
+        }
+        let candidates = library.snapshot().filter { record in
+            record.deletedAt == nil && record.transcript != nil
+                && record.summary == nil && record.category == nil
+        }
+        guard !candidates.isEmpty else {
+            statusText = "没有需要补的录音"
+            return
+        }
+        backfillRunning = true
+        backfillTotal = candidates.count
+        backfillDone = 0
+        Task {
+            defer { backfillRunning = false }
+            for record in candidates {
+                guard var fresh = library.record(id: record.id), let transcript = fresh.transcript else { continue }
+                if let result = await digest(transcript: transcript) {
+                    if fresh.category == nil { fresh.category = result.category }
+                    if fresh.autoTitle == nil { fresh.autoTitle = result.title }
+                    if fresh.summary == nil { fresh.summary = result.summary }
+                    if fresh.actionItems == nil { fresh.actionItems = result.actions }
+                    fresh.updatedAt = Date()
+                    library.upsert(fresh)
+                }
+                backfillDone += 1
+                statusText = "补生成摘要 \(backfillDone)/\(backfillTotal)…"
+            }
+            statusText = "补生成完成：\(backfillDone) 条"
         }
     }
 }
@@ -260,6 +405,59 @@ struct RecordingDigest {
     var summary: String
     @Guide(description: "录音里提到的待办事项,每条一句话;没有待办就给空列表")
     var actionItems: [String]
+}
+
+/// 云端摘要配置(#39):非机密项进 UserDefaults;语义校验集中在这里,设置页与 digest 共用。
+enum CloudDigestSettings {
+    static let enabledKey = "cloudDigest.enabled"
+    static let baseURLKey = "cloudDigest.baseURL"
+    static let modelKey = "cloudDigest.model"
+
+    static var enabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+    static var baseURL: String { UserDefaults.standard.string(forKey: baseURLKey) ?? "" }
+    static var model: String { UserDefaults.standard.string(forKey: modelKey) ?? "" }
+
+    /// 开关开着且三项都填了才算配全。
+    static var isConfigured: Bool {
+        enabled && !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !(CloudDigestSecrets.loadKey() ?? "").isEmpty
+    }
+}
+
+/// API key 存 Keychain 不进 UserDefaults——明文会随设备备份走。最小 kSecClassGenericPassword 封装。
+enum CloudDigestSecrets {
+    private static let service = "com.guanhongli.daytap.cloudDigest"
+    private static let account = "apiKey"
+
+    static func saveKey(_ key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var attrs = query
+        attrs[kSecValueData as String] = Data(trimmed.utf8)
+        SecItemAdd(attrs as CFDictionary, nil)
+    }
+
+    static func loadKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 enum TranscriptionError: LocalizedError {
