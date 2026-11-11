@@ -174,6 +174,21 @@ extension PhoneLink: WCSessionDelegate {
             lastError: nil,
             updatedAt: Date()
         )
+        // 传输完整性守门(#48):手表元数据里的 byteCount 是保存时实测的真实大小;
+        // 实收明显偏小=过河被截断(实测 28B 空壳与 470KB/18MB 半截两类)。
+        // 不保存也不回执——之前收到就回执,手表按回执删原件,截断即数据真丢。
+        let receivedSize = (try? FileManager.default.attributesOfItem(atPath: file.fileURL.path)[.size] as? Int) ?? 0
+        if bytes >= 1024, receivedSize < bytes * 9 / 10 {
+            DayTapLog.library.error("truncated arrival \(id, privacy: .public) expected=\(bytes, privacy: .public) got=\(receivedSize, privacy: .public); not acked")
+            // 之前落下的坏副本要清位:importAudio 见目标存在会跳过复制,坏文件会永远挡住重传。
+            let destination = library.fileURL(id: id)
+            if let existing = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int,
+               existing < bytes * 9 / 10 {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            publish(status: "收到一条不完整的录音（应 \(bytes) 实收 \(receivedSize)），已拒收等手表重传", ready: true)
+            return
+        }
         let saved = library.importAudio(from: file.fileURL, record: record)
         if saved {
             session.transferUserInfo(TransferKeys.ackMetadata(id: id))
