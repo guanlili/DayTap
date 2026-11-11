@@ -883,13 +883,13 @@ private struct GuideSheet: View {
                 Section("手表上的玩法") {
                     guideRow(
                         icon: "applewatch",
-                        title: "三种启停方式",
-                        detail: "点红色大按钮；或握拳（AssistiveTouch 绑定快捷指令）；或指节敲桌面两下（DayTap 在前台时）。录音中按表冠回表盘，录音继续。"
+                        title: "两种启停方式",
+                        detail: "点红色大按钮；或指节敲桌面两下（DayTap 在前台时）。录音中按表冠回表盘，录音继续。"
                     )
                     guideRow(
                         icon: "trash",
                         title: "录错了直接丢弃",
-                        detail: "录着时可用握拳绑定的「丢弃」快捷指令整条弃掉；已停未传的录音在表上点「丢弃待传」。丢弃的不保存、不外传。"
+                        detail: "停止后在表上点「丢弃待传」整条弃掉（不保存、不外传）；或到手机上删除，30 天内可从「最近删除」恢复。"
                     )
                 }
 
