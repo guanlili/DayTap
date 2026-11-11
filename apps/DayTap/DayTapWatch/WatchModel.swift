@@ -118,7 +118,7 @@ final class WatchModel: ObservableObject {
     /// #4:点击必给触觉 + 结果文案,不再让点了像没反应。
     func retry() {
         link.activate()
-        let result = link.retryPending(reason: "manual")
+        let result = link.retryPending(reason: "manual", force: true)
         syncTransferState()
         WKInterfaceDevice.current().play(.click)
         if result.failed > 0 {
