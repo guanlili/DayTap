@@ -29,6 +29,8 @@ struct RecordingListView: View {
     @State private var transcriptRecord: RecordingRecord?
     @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
+    // 设置(#40):配置从指南独立出来,⋯ 菜单进。
+    @State private var showSettings = false
     // 批量管理(#25):编辑态、选中集、批量分享/删除。
     @State private var isEditing = false
     @State private var selectedIDs: Set<String> = []
@@ -109,25 +111,34 @@ struct RecordingListView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showGuide = true
-                    } label: {
-                        Image(systemName: "info.circle")
-                    }
-                    .accessibilityLabel("使用指南")
-                    .accessibilityIdentifier("daytap.guide")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    // 导出 Markdown(#38):当前可见集(受 chips 筛选作用)一键拼单文件。
-                    if !activeRecords.isEmpty {
+                    // ⋯ 菜单(#40):低频入口收敛——导出(#38)/指南/设置,一个图标三个动作。
+                    Menu {
                         Button {
                             exportMarkdown()
                         } label: {
-                            Image(systemName: "doc.text")
+                            Label("导出 Markdown…", systemImage: "doc.text")
                         }
-                        .accessibilityLabel("导出转写为 Markdown")
+                        .disabled(visibleRecords.isEmpty)
                         .accessibilityIdentifier("daytap.export.md")
+
+                        Button {
+                            showGuide = true
+                        } label: {
+                            Label("使用指南", systemImage: "book")
+                        }
+                        .accessibilityIdentifier("daytap.guide")
+
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("设置", systemImage: "gearshape")
+                        }
+                        .accessibilityIdentifier("daytap.settings")
+                    } label: {
+                        Image(systemName: "ellipsis")
                     }
+                    .accessibilityLabel("更多操作")
+                    .accessibilityIdentifier("daytap.more")
                 }
                 ToolbarItem(placement: .bottomBar) {
                     if isEditing {
@@ -213,7 +224,10 @@ struct RecordingListView: View {
             Text("手机上的音频与索引会一并删除，不可恢复。")
         }
         .sheet(isPresented: $showGuide) {
-            GuideSheet(transcriber: transcriber)
+            GuideSheet()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet(transcriber: transcriber)
         }
     }
 
@@ -1321,103 +1335,54 @@ private struct TrashView: View {
 
 /// 使用指南(#15):原首屏文字墙收纳于此,内容一字不丢,只换排版。
 private struct GuideSheet: View {
-    @ObservedObject var transcriber: TranscriptionCenter
     @Environment(\.dismiss) private var dismiss
-    @State private var showCloudDigestSettings = false
 
     var body: some View {
         NavigationStack {
             List {
-                Section("分工") {
+                // #40 瘦身:3 节 7 行,只留「界面答不了的事」——隐藏手势/护栏真相/外部链路。
+                // 操作细节(轻扫/长按/批量/分组/筛选)界面自明,不再写;配置在设置;开发版说明在设置「关于」。
+                Section("录音") {
                     guideRow(
                         icon: "applewatch",
-                        title: "手表和 iPhone 都能录音，不连接得到。",
-                        detail: "手表录音传到 iPhone 确认保存后，手表原件自动清除；iPhone 点列表下方红钮也能直接录（手机录的只存在本机）。"
+                        title: "手表",
+                        detail: "红色大按钮开始/停止；指节敲桌面两下也能启停（DayTap 在前台时），录音中按表冠回表盘不停。录错点「丢弃待传」整条弃掉。传到 iPhone 确认后手表原件自动清除。"
+                    )
+                    guideRow(
+                        icon: "iphone",
+                        title: "iPhone",
+                        detail: "列表下方红钮直接录，录完和手表录音一起出现在这里；手机录的只存在本机。"
                     )
                 }
 
-                Section("操作") {
-                    guideRow(
-                        icon: "hand.tap",
-                        title: "轻点 · 长按 · 轻扫",
-                        detail: "轻点录音行=试听；长按=分享 / 存到文件 / 转文字 / 重命名 / 删除 / 选择；左滑出「转文字」「全文」或「删除」，右滑出「分享」。"
-                    )
-                    guideRow(
-                        icon: "checkmark.circle",
-                        title: "批量管理",
-                        detail: "右上角「编辑」或长按里的「选择」进入多选，可批量分享（一次交给得到 / 文件 / 隔空投送）或批量删除。"
-                    )
-                    guideRow(
-                        icon: "slider.horizontal.3",
-                        title: "回听与搜索",
-                        detail: "播放中进度条可拖动定位，点「1x」循环倍速，点「跳静音」自动跳过句间无声段（需分段转写，语音备忘录做不到的精确跳）；列表顶部可搜标题与转写全文，命中的行点一下直达说那句话的那一刻；全文页点任意句跳播、播放时跟读高亮；删除的录音进「最近删除」保留 30 天。"
-                    )
-                    guideRow(
-                        icon: "calendar",
-                        title: "按天浏览 · 类别筛选",
-                        detail: "列表自动按天分组（今天 / 昨天 / 日期），没起名的录音转写后会自动起内容短标题；转写完成后自动归入 会议 / 活动 / 灵感 / 日常 / 其他，长按「类别」可改；顶部按类别一键筛选。"
-                    )
-                }
-
-                Section("手表上的玩法") {
-                    guideRow(
-                        icon: "applewatch",
-                        title: "两种启停方式",
-                        detail: "点红色大按钮；或指节敲桌面两下（DayTap 在前台时）。录音中按表冠回表盘，录音继续。"
-                    )
-                    guideRow(
-                        icon: "trash",
-                        title: "录错了直接丢弃",
-                        detail: "停止后在表上点「丢弃待传」整条弃掉（不保存、不外传）；或到手机上删除，30 天内可从「最近删除」恢复。"
-                    )
-                }
-
-                Section("转写路线") {
+                Section("转写与整理") {
                     guideRow(
                         icon: "text.bubble",
-                        title: "转文字 · 自动出全文",
-                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。转写完自动出短标题、摘要和待办——列表标题与全文页顶部的卡片直接可用。转写好的行内直接显示摘要（或首行文字），点它看全文，长按「复制文字」一步复制；全文可搜索。"
+                        title: "自动转写",
+                        detail: "录音到位自动转全文（接电源或电量充足时；首次需下载中文语音模型，之后离线；超长的可长按手动转）。转写完自动出短标题、摘要、待办和类别——长按可改名改类别，行内文字点开全文。摘要需要 Apple 智能，国行手机可在设置里配云端摘要。"
                     )
-                    // 云端摘要兜底(#39):国行无 Apple 智能,这里进设置自备接口。
-                    Button {
-                        showCloudDigestSettings = true
-                    } label: {
-                        Label(
-                            CloudDigestSettings.enabled ? "云端摘要 · 已启用" : "云端摘要 · 可选兜底",
-                            systemImage: "cloud"
-                        )
-                    }
-                    .accessibilityIdentifier("daytap.cloud.settings")
                     guideRow(
-                        icon: "text.quote",
-                        title: "Track 1 · 转写后贴给 Bot",
-                        detail: "分享或「存到文件」后，用飞书妙记、快捷指令转写，或把文件送到 Mac 做系统转写。文字再贴给 Bot。不要把这条音频送进得到。"
+                        icon: "waveform",
+                        title: "回听",
+                        detail: "进度条可拖动、点「1x」换倍速；「跳静音」自动跳过句间无声段。搜索能搜标题与全文，点命中处直达说那句话的那一刻；删除的录音进「最近删除」保留 30 天。"
                     )
+                }
+
+                Section("出口") {
                     guideRow(
                         icon: "brain",
                         title: "Track 2 · 得到大脑",
-                        detail: "点「分享」，选得到大脑；或在得到里用「导入音视频」选这个 m4a。得到只在这台 iPhone 上。"
+                        detail: "点「分享」选得到大脑，或得到里「导入音视频」选这个 m4a。得到只在这台 iPhone 上。"
                     )
-                }
-
-                Section("文件在哪里") {
                     guideRow(
-                        icon: "doc.text",
-                        title: "导出 Markdown",
-                        detail: "右上角文档按钮把当前列表（可先按类别筛选）拼成一个 Markdown——按天分节，含标题、类别、摘要、待办与全文；存到文件或隔空投送到 Mac，直接进语料库。"
+                        icon: "text.quote",
+                        title: "Track 1 · 转写交给 Bot",
+                        detail: "「分享」或「存到文件」后用飞书妙记、快捷指令转写，或送到 Mac 做系统转写，文字贴给 Bot 出决策卡。不要把这条音频送进得到。"
                     )
                     guideRow(
                         icon: "folder",
-                        title: "我的 iPhone → DayTap",
-                        detail: "在「文件」App 里打开。链接 daytap://recordings 会回到这个列表。"
-                    )
-                }
-
-                Section {
-                    guideRow(
-                        icon: "wrench.and.screwdriver",
-                        title: "这是开发版",
-                        detail: "还不能从 App Store 安装。表上没装好时，用手机上的得到、语音备忘录或飞书妙记录（Track 0）。"
+                        title: "文件与导出",
+                        detail: "音频在「文件」App → 我的 iPhone → DayTap；⋯ 菜单「导出 Markdown」把当前列表（可按类别先筛）拼成一个文件，隔空投送到 Mac 直接进语料库。"
                     )
                 }
             }
@@ -1428,19 +1393,16 @@ private struct GuideSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showCloudDigestSettings) {
-                CloudDigestSettingsSheet(transcriber: transcriber)
-            }
         }
     }
+}
 
-/// 云端摘要设置(#39):国行无 Apple 智能时的可选兜底,OpenAI 兼容自备接口;
-/// key 进 Keychain;隐私口径=默认关,开了才发送,且页面明示「转写文字会发出去」。
-private struct CloudDigestSettingsSheet: View {
+/// 设置(#40):配置归设置,指南只留知识。云端摘要(#39)自指南平移至此;接口细节开关打开才出现。
+private struct SettingsSheet: View {
     @ObservedObject var transcriber: TranscriptionCenter
     @Environment(\.dismiss) private var dismiss
 
-    @State private var enabled = CloudDigestSettings.enabled
+    @State private var cloudEnabled = CloudDigestSettings.enabled
     @State private var baseURL = CloudDigestSettings.baseURL
     @State private var model = CloudDigestSettings.model
     @State private var apiKey = CloudDigestSecrets.loadKey() ?? ""
@@ -1449,41 +1411,54 @@ private struct CloudDigestSettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("启用云端摘要", isOn: $enabled)
+                    Toggle("云端摘要", isOn: $cloudEnabled)
+                } header: {
+                    Text("转写整理")
                 } footer: {
-                    Text("本机 Apple 智能不可用时的可选兜底（国行 iPhone 目前不支持）。本机可用时始终优先本机；启用后，转写文字将发送到你配置的服务生成摘要/标题/类别。")
+                    Text("本机 Apple 智能不可用时的可选兜底（国行目前不支持），本机可用时始终优先本机。启用后转写文字将发送到你配置的服务，生成摘要/标题/类别。")
                 }
 
-                Section("接口（OpenAI 兼容）") {
-                    TextField("Base URL", text: $baseURL, prompt: Text("如 https://open.bigmodel.cn/api/paas/v4"))
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("模型", text: $model, prompt: Text("如 glm-4-flash"))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("API Key", text: $apiKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                // 接口细节开关开着才出现(#40 渐进披露):没开兜底的人不该看见三个输入框。
+                if cloudEnabled {
+                    Section("接口（OpenAI 兼容）") {
+                        TextField("Base URL", text: $baseURL, prompt: Text("如 https://open.bigmodel.cn/api/paas/v4"))
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("模型", text: $model, prompt: Text("如 glm-4-flash"))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField("API Key", text: $apiKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+
+                    Section {
+                        Button {
+                            transcriber.backfillDigests()
+                        } label: {
+                            if transcriber.backfillRunning {
+                                Text("补生成中 \(transcriber.backfillDone)/\(transcriber.backfillTotal)…")
+                            } else {
+                                let count = transcriber.backfillCandidateCount
+                                Text(count > 0 ? "为现有转写补生成摘要（\(count) 条）" : "没有需要补的录音")
+                            }
+                        }
+                        .disabled(transcriber.backfillRunning)
+                    } footer: {
+                        Text("为已转写但还没有摘要/类别的录音串行补生成。")
+                    }
                 }
 
                 Section {
-                    Button {
-                        transcriber.backfillDigests()
-                    } label: {
-                        if transcriber.backfillRunning {
-                            Text("补生成中 \(transcriber.backfillDone)/\(transcriber.backfillTotal)…")
-                        } else {
-                            let count = transcriber.backfillCandidateCount
-                            Text(count > 0 ? "为现有转写补生成摘要（\(count) 条）" : "没有需要补的录音")
-                        }
-                    }
-                    .disabled(transcriber.backfillRunning || !enabled)
+                    LabeledContent("版本", value: "开发版")
+                } header: {
+                    Text("关于")
                 } footer: {
-                    Text("为已转写但还没有摘要/类别的录音串行补生成（先保存配置）。")
+                    Text("还不能从 App Store 安装，用 Xcode 侧载；表上没装好时用手机自带录音替代。链接 daytap://recordings 会回到录音列表。")
                 }
             }
-            .navigationTitle("云端摘要")
+            .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -1493,7 +1468,7 @@ private struct CloudDigestSettingsSheet: View {
                     Button("保存") {
                         let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
                         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-                        UserDefaults.standard.set(enabled, forKey: CloudDigestSettings.enabledKey)
+                        UserDefaults.standard.set(cloudEnabled, forKey: CloudDigestSettings.enabledKey)
                         UserDefaults.standard.set(trimmedBase, forKey: CloudDigestSettings.baseURLKey)
                         UserDefaults.standard.set(trimmedModel, forKey: CloudDigestSettings.modelKey)
                         CloudDigestSecrets.saveKey(apiKey)
@@ -1523,4 +1498,3 @@ private func guideRow(icon: String, title: String, detail: String? = nil) -> som
         }
         .padding(.vertical, 2)
     }
-}
