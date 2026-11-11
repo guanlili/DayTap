@@ -117,6 +117,18 @@ struct RecordingListView: View {
                     .accessibilityLabel("使用指南")
                     .accessibilityIdentifier("daytap.guide")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    // 导出 Markdown(#38):当前可见集(受 chips 筛选作用)一键拼单文件。
+                    if !activeRecords.isEmpty {
+                        Button {
+                            exportMarkdown()
+                        } label: {
+                            Image(systemName: "doc.text")
+                        }
+                        .accessibilityLabel("导出转写为 Markdown")
+                        .accessibilityIdentifier("daytap.export.md")
+                    }
+                }
                 ToolbarItem(placement: .bottomBar) {
                     if isEditing {
                         batchBar
@@ -434,6 +446,56 @@ struct RecordingListView: View {
             return
         }
         batchShareURLs = urls
+    }
+
+    /// 导出 Markdown(#38):当前可见集(chips 筛选+搜索结果,同全选口径)拼单文件,
+    /// 按天分节;有什么导什么——摘要/待办/全文,没转写的只导一行元信息。
+    /// 复用批量分享的 sheet 出系统面板:存到文件/隔空投送/复制都在里面。
+    private func exportMarkdown() {
+        guard !visibleRecords.isEmpty else {
+            banner = "没有可导出的录音"
+            return
+        }
+        var lines: [String] = ["# DayTap 转写 · \(Date().formatted(date: .abbreviated, time: .omitted))"]
+        if let categoryFilter {
+            lines.append("")
+            lines.append("筛选类别：**\(categoryFilter)**")
+        }
+        for group in groupedByDay {
+            lines.append("")
+            lines.append("## \(dayTitle(group.day))")
+            for record in group.records {
+                lines.append("")
+                let time = record.createdAt.formatted(date: .omitted, time: .shortened)
+                let cat = record.category.map { " · \($0)" } ?? ""
+                lines.append("### \(time) \(displayTitle(record))\(cat)")
+                guard let transcript = record.transcript else {
+                    lines.append("（未转写 · \(DayTapFormat.clock(record.durationSeconds))）")
+                    continue
+                }
+                if let summary = record.summary, !summary.isEmpty {
+                    lines.append("**摘要** \(summary)")
+                }
+                if let actions = record.actionItems, !actions.isEmpty {
+                    lines.append("**待办**")
+                    for item in actions {
+                        lines.append("- \(item)")
+                    }
+                }
+                lines.append("")
+                lines.append(transcript)
+            }
+        }
+        let dateText = Date().formatted(.iso8601.year().month().day())
+        let suffix = categoryFilter.map { "-\($0)" } ?? ""
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DayTap-转写-\(dateText)\(suffix).md")
+        do {
+            try lines.joined(separator: "\n").data(using: .utf8)?.write(to: url, options: .atomic)
+            batchShareURLs = [url]
+        } catch {
+            banner = "导出失败：\(error.localizedDescription)"
+        }
     }
 
     /// 批量落删(#25→#26 软删):正在播的在集内先停播,逐条进回收站。
@@ -1327,6 +1389,11 @@ private struct GuideSheet: View {
                 }
 
                 Section("文件在哪里") {
+                    guideRow(
+                        icon: "doc.text",
+                        title: "导出 Markdown",
+                        detail: "右上角文档按钮把当前列表（可先按类别筛选）拼成一个 Markdown——按天分节，含标题、类别、摘要、待办与全文；存到文件或隔空投送到 Mac，直接进语料库。"
+                    )
                     guideRow(
                         icon: "folder",
                         title: "我的 iPhone → DayTap",

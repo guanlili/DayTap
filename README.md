@@ -24,7 +24,7 @@ English blurb: **DayTap** — wrist-first or phone-primary on-demand capture →
 | **iPhone** | DayTap 收文件、列出、分享；录音到位**自动转全文**（本机转写，行内预览、一键复制），列表按天分组、按类别自动归类筛选。Track 2 才把文件交给得到；Track 1 把同一文件交给飞书/系统转写。也可 **Track 0** 手机主录 |
 | **得到（得到大脑）** | **仅 iPhone**：Track 2 / 方案 A 转写 |
 | **Track 1 ASR** | 无得到：Mac 系统转写 / 快捷指令 / 飞书妙记 / Obsidian 文字落点 |
-| **本地语料库** | 按日/场/人沉淀 Markdown |
+| **本地语料库** | 手机端一键导出 Markdown（按天/类别/摘要/待办/全文），按日/场/人沉淀 |
 | **Grok Bot + Skills** | 读语料 → 决策卡 / PPT 大纲 |
 
 **不做**：宣称 Watch 全天候无中断录音是系统默认能力（见约束）。  
