@@ -31,6 +31,8 @@ struct RecordingListView: View {
     @State private var showGuide = false
     // 设置(#40):配置从指南独立出来,⋯ 菜单进。
     @State private var showSettings = false
+    // 导出选项页(#41):格式×内容在页里选,不再一击定死 Markdown。
+    @State private var showExport = false
     // 批量管理(#25):编辑态、选中集、批量分享/删除。
     @State private var isEditing = false
     @State private var selectedIDs: Set<String> = []
@@ -111,12 +113,12 @@ struct RecordingListView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    // ⋯ 菜单(#40):低频入口收敛——导出(#38)/指南/设置,一个图标三个动作。
+                    // ⋯ 菜单(#40):低频入口收敛——导出(#41 选项页)/指南/设置,一个图标三个动作。
                     Menu {
                         Button {
-                            exportMarkdown()
+                            showExport = true
                         } label: {
-                            Label("导出 Markdown…", systemImage: "doc.text")
+                            Label("导出…", systemImage: "doc.text")
                         }
                         .disabled(visibleRecords.isEmpty)
                         .accessibilityIdentifier("daytap.export.md")
@@ -228,6 +230,9 @@ struct RecordingListView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet(transcriber: transcriber)
+        }
+        .sheet(isPresented: $showExport) {
+            ExportSheet(records: visibleRecords, category: categoryFilter)
         }
     }
 
@@ -462,55 +467,7 @@ struct RecordingListView: View {
         batchShareURLs = urls
     }
 
-    /// 导出 Markdown(#38):当前可见集(chips 筛选+搜索结果,同全选口径)拼单文件,
-    /// 按天分节;有什么导什么——摘要/待办/全文,没转写的只导一行元信息。
-    /// 复用批量分享的 sheet 出系统面板:存到文件/隔空投送/复制都在里面。
-    private func exportMarkdown() {
-        guard !visibleRecords.isEmpty else {
-            banner = "没有可导出的录音"
-            return
-        }
-        var lines: [String] = ["# DayTap 转写 · \(Date().formatted(date: .abbreviated, time: .omitted))"]
-        if let categoryFilter {
-            lines.append("")
-            lines.append("筛选类别：**\(categoryFilter)**")
-        }
-        for group in groupedByDay {
-            lines.append("")
-            lines.append("## \(dayTitle(group.day))")
-            for record in group.records {
-                lines.append("")
-                let time = record.createdAt.formatted(date: .omitted, time: .shortened)
-                let cat = record.category.map { " · \($0)" } ?? ""
-                lines.append("### \(time) \(displayTitle(record))\(cat)")
-                guard let transcript = record.transcript else {
-                    lines.append("（未转写 · \(DayTapFormat.clock(record.durationSeconds))）")
-                    continue
-                }
-                if let summary = record.summary, !summary.isEmpty {
-                    lines.append("**摘要** \(summary)")
-                }
-                if let actions = record.actionItems, !actions.isEmpty {
-                    lines.append("**待办**")
-                    for item in actions {
-                        lines.append("- \(item)")
-                    }
-                }
-                lines.append("")
-                lines.append(transcript)
-            }
-        }
-        let dateText = Date().formatted(.iso8601.year().month().day())
-        let suffix = categoryFilter.map { "-\($0)" } ?? ""
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DayTap-转写-\(dateText)\(suffix).md")
-        do {
-            try lines.joined(separator: "\n").data(using: .utf8)?.write(to: url, options: .atomic)
-            batchShareURLs = [url]
-        } catch {
-            banner = "导出失败：\(error.localizedDescription)"
-        }
-    }
+    // MARK: - 导出(#38→#41,构建器与选项页在文件级 ExportBuilder/ExportSheet)
 
     /// 批量落删(#25→#26 软删):正在播的在集内先停播,逐条进回收站。
     private func commitBatchDelete() {
@@ -1382,7 +1339,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "folder",
                         title: "文件与导出",
-                        detail: "音频在「文件」App → 我的 iPhone → DayTap；⋯ 菜单「导出 Markdown」把当前列表（可按类别先筛）拼成一个文件，隔空投送到 Mac 直接进语料库。"
+                        detail: "音频在「文件」App → 我的 iPhone → DayTap；⋯ 菜单「导出」把当前列表（可按类别先筛）拼成一个文件——Markdown 进语料库、纯文本直接粘贴、JSON 喂脚本，内容可选完整或仅摘要卡。"
                     )
                 }
             }
@@ -1391,6 +1348,203 @@ private struct GuideSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// 导出格式(#41):三种下游三种壳——Markdown 给语料库、纯文本给聊天粘贴、JSON 给脚本管道。
+enum ExportFormat: String, CaseIterable, Identifiable {
+    case markdown = "Markdown"
+    case plainText = "纯文本"
+    case json = "JSON"
+
+    var id: String { rawValue }
+    var fileExtension: String {
+        switch self {
+        case .markdown: return "md"
+        case .plainText: return "txt"
+        case .json: return "json"
+        }
+    }
+}
+
+/// 导出内容(#41):完整=摘要+待办+全文;仅摘要卡=标题+类别+摘要+待办,不含全文(决策卡直投)。
+enum ExportContent: String, CaseIterable, Identifiable {
+    case full = "完整"
+    case digestOnly = "仅摘要卡"
+
+    var id: String { rawValue }
+}
+
+/// 导出构建(#41):格式×内容 → 单文件。Markdown 沿用 #38 结构,纯文本同源去标记,JSON 给机器。
+private enum ExportBuilder {
+    /// 标题口径与列表一致:手动名 > 自动短标题 > 时刻。
+    static func title(_ record: RecordingRecord) -> String {
+        if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        if let auto = record.autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !auto.isEmpty {
+            return auto
+        }
+        return record.createdAt.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// 按天归组(records 已按 createdAt 倒序,同列表分组口径)。
+    private static func grouped(_ records: [RecordingRecord]) -> [(day: Date, records: [RecordingRecord])] {
+        let calendar = Calendar.current
+        var groups: [(day: Date, records: [RecordingRecord])] = []
+        for record in records {
+            let day = calendar.startOfDay(for: record.createdAt)
+            if groups.last?.day == day {
+                groups[groups.count - 1].records.append(record)
+            } else {
+                groups.append((day, [record]))
+            }
+        }
+        return groups
+    }
+
+    /// 生成并写临时文件,失败返回 nil。
+    static func makeFile(records: [RecordingRecord], format: ExportFormat, content: ExportContent, category: String?) -> URL? {
+        let dateText = Date().formatted(.iso8601.year().month().day())
+        let suffix = category.map { "-\($0)" } ?? ""
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DayTap-转写-\(dateText)\(suffix).\(format.fileExtension)")
+        let data: Data
+        switch format {
+        case .json:
+            // 仅摘要卡时剥掉全文与分段,JSON 与文本格式同口径。
+            let out: [RecordingRecord] = content == .full ? records : records.map { record in
+                var trimmed = record
+                trimmed.transcript = nil
+                trimmed.transcriptSegments = nil
+                return trimmed
+            }
+            data = (try? JSONEncoder.exportData(records: out)) ?? Data("[]".utf8)
+        default:
+            data = Data(text(records: records, format: format, content: content, category: category).utf8)
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    /// Markdown/纯文本 共用拼装:同源不同壳(#38 结构,纯文本只换标记)。
+    static func text(records: [RecordingRecord], format: ExportFormat, content: ExportContent, category: String?) -> String {
+        let markdown = format == .markdown
+        let today = Date().formatted(date: .abbreviated, time: .omitted)
+        var lines: [String] = [markdown ? "# DayTap 转写 · \(today)" : "DayTap 转写 · \(today)"]
+        if let category {
+            lines.append("")
+            lines.append(markdown ? "筛选类别：**\(category)**" : "筛选类别：\(category)")
+        }
+        let calendar = Calendar.current
+        for group in grouped(records) {
+            let header: String
+            if calendar.isDateInToday(group.day) {
+                header = "今天"
+            } else if calendar.isDateInYesterday(group.day) {
+                header = "昨天"
+            } else {
+                header = group.day.formatted(date: .abbreviated, time: .omitted)
+            }
+            lines.append("")
+            lines.append(markdown ? "## \(header)" : "【\(header)】")
+            for record in group.records {
+                lines.append("")
+                let time = record.createdAt.formatted(date: .omitted, time: .shortened)
+                let cat = record.category.map { " · \($0)" } ?? ""
+                lines.append(markdown ? "### \(time) \(title(record))\(cat)" : "\(time) \(title(record))\(cat)")
+                if record.transcript == nil {
+                    lines.append("（未转写 · \(DayTapFormat.clock(record.durationSeconds))）")
+                    continue
+                }
+                if let summary = record.summary, !summary.isEmpty {
+                    lines.append(markdown ? "**摘要** \(summary)" : "摘要：\(summary)")
+                }
+                if let actions = record.actionItems, !actions.isEmpty {
+                    lines.append(markdown ? "**待办**" : "待办：")
+                    for item in actions {
+                        lines.append(markdown ? "- \(item)" : "· \(item)")
+                    }
+                }
+                if content == .full, let transcript = record.transcript {
+                    lines.append("")
+                    lines.append(transcript)
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private extension JSONEncoder {
+    /// JSON 导出(#41):结构化给 pipeline/脚本;完整模式带分段供跳播数据复用。
+    static func exportData(records: [RecordingRecord]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(records)
+    }
+}
+
+/// 导出选项页(#41):格式×内容两排分段选择,自本页弹系统分享面板(不与外层 sheet 打架)。
+private struct ExportSheet: View {
+    let records: [RecordingRecord]
+    let category: String?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var format: ExportFormat = .markdown
+    @State private var content: ExportContent = .full
+    @State private var shareURL: URL?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("格式", selection: $format) {
+                        ForEach(ExportFormat.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("内容", selection: $content) {
+                        ForEach(ExportContent.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("导出 \(records.count) 条")
+                } footer: {
+                    Text("Markdown 进语料库；纯文本直接粘贴；JSON 喂脚本。仅摘要卡不含全文，适合把决策卡直投聊天。")
+                }
+
+                Section {
+                    Button {
+                        shareURL = ExportBuilder.makeFile(records: records, format: format, content: content, category: category)
+                    } label: {
+                        Label("分享 / 存到文件", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(records.isEmpty)
+                }
+            }
+            .navigationTitle("导出")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { shareURL != nil },
+                set: { if !$0 { shareURL = nil } }
+            )) {
+                if let shareURL {
+                    ActivityShareSheet(url: shareURL)
+                        .ignoresSafeArea()
                 }
             }
         }
