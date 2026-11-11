@@ -176,6 +176,10 @@ struct RecordingListView: View {
             // #15:「已打开录音列表」对正在看屏幕的人没有信息量,只留日志。
             DayTapLog.link.info("open url \(url.absoluteString, privacy: .public)")
         }
+        // 守门拒收可见化(#48):文件到了但不完整,数字直接亮在列表顶。
+        .onReceive(NotificationCenter.default.publisher(for: .daytapTransferRejected)) { note in
+            banner = note.object as? String ?? "一条录音传输不完整，已拒收等手表重传"
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 link.activate()

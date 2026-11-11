@@ -3,6 +3,11 @@ import Combine
 import Foundation
 import WatchConnectivity
 
+extension Notification.Name {
+    /// 手表来件被完整性守门拒收(#48):列表页 banner 可见化,不再静默。
+    static let daytapTransferRejected = Notification.Name("daytap.transferRejected")
+}
+
 /// iPhone 侧接收手表文件。
 /// 系统可能在后台把 App 唤醒后立刻调用 `didReceive`。委托必须在启动时就挂上。
 /// 回调返回前要把文件拷走：系统随后会删掉收件箱里的那份临时文件。
@@ -186,7 +191,11 @@ extension PhoneLink: WCSessionDelegate {
                existing < bytes * 9 / 10 {
                 try? FileManager.default.removeItem(at: destination)
             }
-            publish(status: "收到一条不完整的录音（应 \(bytes) 实收 \(receivedSize)），已拒收等手表重传", ready: true)
+            // 拒收必须可见(#48 修正):publish 的文案只在「未连接」卡里渲染,连接正常时整条吞掉——
+            // 用户看到的就是"手机没反应"。改走通知进列表页 banner,带应/实收数字。
+            let message = "一条录音传输不完整（\(DayTapFormat.clock(duration))，应 \(DayTapFormat.bytes(bytes)) 实收 \(DayTapFormat.bytes(receivedSize))）——已拒收，原件在手表会重试"
+            publish(status: message, ready: true)
+            NotificationCenter.default.post(name: .daytapTransferRejected, object: message)
             return
         }
         let saved = library.importAudio(from: file.fileURL, record: record)
