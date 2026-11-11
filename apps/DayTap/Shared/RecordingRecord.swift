@@ -87,6 +87,11 @@ enum TransferKeys {
     static let kind = "daytap.kind"
     static let kindRecording = "recording"
     static let kindAck = "ack"
+    /// 对账(#49):手表连上手机时报未确认清单,手机逐条答「已有/重传」——回执丢失不再让角标虚高。
+    static let kindReconcile = "reconcile"
+    static let items = "items"
+    static let acked = "acked"
+    static let resend = "resend"
     static let id = "id"
     static let createdAt = "createdAt"
     static let durationSeconds = "durationSeconds"

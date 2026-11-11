@@ -206,4 +206,41 @@ extension PhoneLink: WCSessionDelegate {
     func sessionReachabilityDidChange(_ session: WCSession) {
         DayTapLog.link.info("iPhone saw reachability \(session.isReachable)")
     }
+
+    /// 对账裁决(#49):手表报来的未确认条目,按实际落盘情况逐条回答。
+    /// 裁决口径与收件守门(#48)一致:文件在且 ≥ 手表实测的 90% = 已有,否则要重传
+    /// (含「索引有但文件是截断坏副本」——让它重传好件来覆盖)。
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        guard (message[TransferKeys.kind] as? String) == TransferKeys.kindReconcile,
+              let items = message[TransferKeys.items] as? [[String: Any]]
+        else {
+            replyHandler([:])
+            return
+        }
+        var acked: [String] = []
+        var resend: [String] = []
+        for item in items {
+            guard let id = item[TransferKeys.id] as? String else { continue }
+            let expected = TransferKeys.doubleValue(item[TransferKeys.byteCount])
+            let url = library.fileURL(id: id)
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Double) ?? 0
+            let intact = library.record(id: id) != nil
+                && FileManager.default.fileExists(atPath: url.path)
+                && (expected < 1024 || fileSize >= expected * 0.9)
+            if intact {
+                acked.append(id)
+            } else {
+                resend.append(id)
+            }
+        }
+        DayTapLog.link.info("reconcile verdict acked=\(acked.count, privacy: .public) resend=\(resend.count, privacy: .public)")
+        replyHandler([
+            TransferKeys.acked: acked,
+            TransferKeys.resend: resend
+        ])
+    }
 }

@@ -307,6 +307,47 @@ extension WatchLink: WCSessionDelegate {
         DayTapLog.link.info("reachability \(session.isReachable)")
         DispatchQueue.main.async {
             self.retryPending(reason: "reachability")
+            if session.isReachable {
+                self.reconcile()
+            }
         }
+    }
+
+    /// 对账(#49):手表把「还没确认的」清单发给手机,手机按实际落盘情况逐条裁决。
+    /// 回执走排队通道会丢,丢一次角标就永远虚高(实测 12 条里混着早已收到的)——
+    /// 每次可达就对一遍账,状态自愈。
+    private func reconcile() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.isReachable, session.activationState == .activated else { return }
+        let pending = library.snapshot().filter(\.awaitsPhoneAck)
+        guard !pending.isEmpty else { return }
+        let items: [[String: Any]] = pending.map { [
+            TransferKeys.id: $0.id,
+            TransferKeys.byteCount: $0.byteCount
+        ] }
+        session.sendMessage([
+            TransferKeys.kind: TransferKeys.kindReconcile,
+            TransferKeys.items: items
+        ]) { reply in
+            DispatchQueue.main.async { self.applyReconcileReply(reply) }
+        }
+    }
+
+    /// 手机裁决落地:已有的按确认即删清账(#21 口径),要重传的立刻排走。
+    private func applyReconcileReply(_ reply: [String: Any]) {
+        let acked = reply[TransferKeys.acked] as? [String] ?? []
+        let resend = reply[TransferKeys.resend] as? [String] ?? []
+        for id in acked {
+            clearSubmitted(id)
+            library.remove(id: id)
+            DayTapLog.link.info("reconcile acked \(id, privacy: .public); purged on watch")
+        }
+        for id in resend {
+            guard let record = library.record(id: id), record.awaitsPhoneAck else { continue }
+            enqueue(record)
+        }
+        refreshSummary(reachable: WCSession.default.isReachable, reason: "reconcile")
+        DayTapLog.link.info("reconcile done acked=\(acked.count, privacy: .public) resend=\(resend.count, privacy: .public)")
     }
 }
