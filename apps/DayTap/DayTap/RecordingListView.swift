@@ -108,6 +108,8 @@ struct RecordingListView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 link.activate()
+                // 回前台顺一把自动转写队列(#29)。
+                transcriber.drainAutoQueue()
             } else if phase != .inactive {
                 player.reset()
                 // 手机不开后台模式:退后台即停录保存(#3),与手表同口径。
@@ -489,7 +491,7 @@ struct RecordingListView: View {
                             Label("转文字", systemImage: "text.bubble")
                         }
                         .tint(.accentColor)
-                        .disabled(transcriber.activeID != nil)
+                        // #29:忙碌中不禁用,点按即插队(pendingManualID)
                     }
                 }
         }
@@ -578,7 +580,7 @@ struct RecordingListView: View {
             } label: {
                 Label("转文字", systemImage: "text.bubble")
             }
-            .disabled(transcriber.activeID != nil)
+            // #29:忙碌中不禁用,点按即插队
             .accessibilityIdentifier("daytap.transcribe.\(record.id)")
         }
 
@@ -749,7 +751,7 @@ private struct TranscriptView: View {
                     } label: {
                         Label("重新转写", systemImage: "arrow.clockwise")
                     }
-                    .disabled(transcriber.activeID != nil)
+                    // #29:忙碌中不禁用,点按即插队
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if let text = record?.transcript {
@@ -896,8 +898,8 @@ private struct GuideSheet: View {
                 Section("转写路线") {
                     guideRow(
                         icon: "text.bubble",
-                        title: "转文字 · 本机出全文",
-                        detail: "点录音下方的「转文字」，用 iPhone 自带的语音识别在本机完成（首次需要下载中文语音模型，之后离线可用）。"
+                        title: "转文字 · 自动出全文",
+                        detail: "新录音在接电源或电量充足时自动转写（首次需下载中文语音模型，之后离线）；超长录音和没转的可长按手动转。全文可搜索、可复制分享。"
                     )
                     guideRow(
                         icon: "text.quote",

@@ -15,6 +15,15 @@ enum TransferState: String, Codable {
     case failed
 }
 
+/// 转写的时间戳分段(#29):一段文字 + 它在音频里的位置。
+/// 搜索仍走 transcript 纯文本(快);分段只用于「命中跳播/点句跳播」的定位与渲染。
+struct TranscriptSegment: Codable, Equatable {
+    var text: String
+    /// 距录音开始的秒数。
+    var start: Double
+    var duration: Double
+}
+
 /// 手表和 iPhone 共用的一条录音索引。文件名永远由 `id` 推导，不采用对方传来的路径。
 struct RecordingRecord: Codable, Identifiable, Equatable {
     var id: String
@@ -30,6 +39,8 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 手机端转写出的全文。nil=还没转过。
     /// 可选字段,旧 index.json 解码为 nil,天然向后兼容;不参与手表传输协议。
     var transcript: String?
+    /// 带时间戳的转写分段(#29)。nil=旧转写或没转过——可搜索、不可跳播,UI 自动降级。
+    var transcriptSegments: [TranscriptSegment]? = nil
     /// 录音来源(#3):nil=手表(旧数据天然如此),"phone"=手机直接录。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机录的永远不出本机)。
     var origin: String? = nil

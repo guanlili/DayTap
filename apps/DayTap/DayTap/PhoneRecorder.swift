@@ -132,7 +132,9 @@ final class PhoneRecorder: ObservableObject {
         // 录进文稿目录、按真实落盘大小覆盖 byteCount、状态置已确认——手表收件走的是同一扇门。
         library.importAudio(from: url, record: record)
         try? FileManager.default.removeItem(at: url)
-        statusText = nil
+        statusText = reason
+        // 通知转写中心试清自动队列(#29)。
+        NotificationCenter.default.post(name: .daytapRecordImported, object: nil)
     }
 
     private func startTimer() {

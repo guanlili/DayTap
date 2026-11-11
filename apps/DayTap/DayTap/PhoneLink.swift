@@ -158,6 +158,8 @@ extension PhoneLink: WCSessionDelegate {
             session.transferUserInfo(TransferKeys.ackMetadata(id: id))
             DayTapLog.link.info("acked \(id, privacy: .public)")
             publish(status: "刚收到一条手表录音", ready: true)
+            // 通知转写中心试清自动队列(#29)。
+            NotificationCenter.default.post(name: .daytapRecordImported, object: nil)
         } else {
             // 不回执。手表仍保留原文件，下次会再传。临时收件箱里的这份系统会自己删。
             DayTapLog.link.error("did not ack \(id, privacy: .public); watch will retry")
