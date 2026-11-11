@@ -1563,7 +1563,7 @@ private struct SettingsSheet: View {
     @State private var modelSelection: String
     @State private var customModel: String
     @State private var apiKey: String
-    @State private var testResult: String?
+    @State private var testResult: (ok: Bool, message: String)?
     @State private var testing = false
 
     /// 模型 Picker 里「自定义…」的哨兵值。
@@ -1645,10 +1645,17 @@ private struct SettingsSheet: View {
                             }
                         }
                         .disabled(testing)
+                        // 结果语义化着色(#42 甲方反馈):成功=绿色对勾,失败=警示色三角+原因,不再一行死灰。
                         if let testResult {
-                            Text(testResult)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Image(systemName: testResult.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(testResult.ok ? Color.green : Color.orange)
+                                Text(testResult.message)
+                                    .foregroundStyle(testResult.ok ? Color.green : Color.secondary)
+                            }
+                            .font(.caption)
+                            .accessibilityLabel(testResult.ok ? "连接正常" : testResult.message)
+                            .accessibilityIdentifier("daytap.llm.testResult")
                         }
                     } footer: {
                         Text("模型候选只是起点，各家上新快，以控制台为准，选「自定义…」可填任意型号。")

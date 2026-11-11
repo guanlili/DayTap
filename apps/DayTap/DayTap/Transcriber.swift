@@ -319,8 +319,9 @@ final class TranscriptionCenter: ObservableObject {
     }
 
     /// 连通性测试(#42):设置页一键验配——别等第一条录音失败才发现配错。
-    static func testLLMConnection() async -> String {
-        guard let client = LLMClient() else { return "配置不全（服务商 / 模型 / API Key）" }
+    /// 返回 (成败, 面向用户文案);界面按成败着色(绿=通,警示色=不通)。
+    static func testLLMConnection() async -> (ok: Bool, message: String) {
+        guard let client = LLMClient() else { return (false, "配置不全（服务商 / 模型 / API Key）") }
         do {
             let reply = try await client.chat(
                 system: "你是连通性测试助手。",
@@ -329,12 +330,12 @@ final class TranscriptionCenter: ObservableObject {
             )
             let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty
-                ? "服务有响应，但返回为空"
-                : "连接正常 · \(LLMSettings.provider.displayName) \(LLMSettings.model)"
+                ? (false, "服务有响应，但返回为空")
+                : (true, "连接正常 · \(LLMSettings.provider.displayName) \(LLMSettings.model)")
         } catch let error as LLMClient.CallError {
-            return "失败：\(error.message)"
+            return (false, "失败：\(error.message)")
         } catch {
-            return "失败：\(error.localizedDescription)"
+            return (false, "失败：\(error.localizedDescription)")
         }
     }
 
