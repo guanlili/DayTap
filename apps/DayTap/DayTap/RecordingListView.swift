@@ -851,6 +851,25 @@ struct RecordingListView: View {
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("播放速度\(speedLabel)")
+
+                // 跳静音(#37):有分段才显示;开着=落在句间空隙自动跳下一句。
+                if record.transcriptSegments != nil {
+                    Button {
+                        player.toggleSkipSilence()
+                    } label: {
+                        Text("跳静音")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(player.skipsSilence ? Color.white : Color.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(player.skipsSilence ? Color.accentColor : Color.secondary.opacity(0.15))
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(player.skipsSilence ? "跳静音,已开" : "跳静音,已关")
+                    .accessibilityIdentifier("daytap.skipsilence")
+                }
                 Spacer()
                 Text(DayTapFormat.clock(max(player.duration, record.durationSeconds)))
             }
@@ -1267,7 +1286,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "slider.horizontal.3",
                         title: "回听与搜索",
-                        detail: "播放中进度条可拖动定位，点「1x」循环倍速；列表顶部可搜标题与转写全文，命中的行点一下直达说那句话的那一刻；全文页点任意句跳播、播放时跟读高亮；删除的录音进「最近删除」保留 30 天。"
+                        detail: "播放中进度条可拖动定位，点「1x」循环倍速，点「跳静音」自动跳过句间无声段（需分段转写，语音备忘录做不到的精确跳）；列表顶部可搜标题与转写全文，命中的行点一下直达说那句话的那一刻；全文页点任意句跳播、播放时跟读高亮；删除的录音进「最近删除」保留 30 天。"
                     )
                     guideRow(
                         icon: "calendar",
