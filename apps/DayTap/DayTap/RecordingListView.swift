@@ -139,7 +139,8 @@ struct RecordingListView: View {
             TranscriptView(
                 recordID: record.id,
                 library: PhoneLink.shared.library,
-                transcriber: transcriber
+                transcriber: transcriber,
+                player: player
             )
         }
         .sheet(item: $shareRecord) { record in
@@ -356,8 +357,9 @@ struct RecordingListView: View {
         }
     }
 
-    /// 全文命中上下文(#26):标题没命中但全文命中时,取关键词前后一小段做预览。
-    private func transcriptSnippet(_ record: RecordingRecord) -> String? {
+    /// 全文命中(#26 上下文 → #32 高亮+跳播):标题没命中但全文命中时,
+    /// 返回带高亮关键词的预览与该词所在的音频秒数(有分段才有精确 offset)。
+    private func transcriptSnippet(_ record: RecordingRecord) -> (text: AttributedString, offset: TimeInterval)? {
         let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty,
               let transcript = record.transcript,
@@ -371,7 +373,29 @@ struct RecordingListView: View {
             ?? transcript.endIndex
         let head = start > transcript.startIndex ? "…" : ""
         let tail = end < transcript.endIndex ? "…" : ""
-        return "全文 \(head)\(transcript[start..<end])\(tail)"
+        var attr = AttributedString("全文 \(head)\(transcript[start..<end])\(tail)")
+        if let hit = attr.range(of: keyword, options: [.caseInsensitive, .diacriticInsensitive]) {
+            attr[hit].foregroundColor = .accentColor
+            attr[hit].font = .caption2.weight(.semibold)
+        }
+
+        // 定位:第一个包含关键词的分段(无分段=旧转写,offset 0=从头播,降级口径)。
+        var offset: TimeInterval = 0
+        if let segments = record.transcriptSegments {
+            offset = segments.first {
+                $0.text.localizedCaseInsensitiveContains(keyword)
+            }?.start ?? 0
+        }
+        return (attr, offset)
+    }
+
+    /// 点命中预览:跳到那一刻播放(#32)。无分段的老转写退化为从头播。
+    private func playFromHit(_ record: RecordingRecord, offset: TimeInterval) {
+        guard FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path) else {
+            banner = "找不到这条音频文件"
+            return
+        }
+        player.toggle(record, fileURL: library.fileURL(id: record.id), at: offset)
     }
 
     /// 底栏录音钮(#3):闲时红色大麦克风;录时红点+计时+音量条+停止键。语音备忘录的语言。
@@ -519,10 +543,19 @@ struct RecordingListView: View {
                     .foregroundStyle(.secondary)
 
                 if let snippet = transcriptSnippet(record) {
-                    Text(snippet)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Button {
+                        playFromHit(record, offset: snippet.offset)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Image(systemName: "play.circle")
+                                .font(.caption2)
+                                .foregroundStyle(Color.accentColor)
+                            Text(snippet.text)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("跳到命中处播放")
+                    .accessibilityIdentifier("daytap.search.hit.\(record.id)")
                 }
 
                 if active {
@@ -711,21 +744,29 @@ struct RecordingListView: View {
     }
 }
 
-/// 全文 sheet:转写结果的可选中文本,配复制 / 分享文字 / 重新转写。
-/// 内容按 id 从库内实时取,重转完成后文字自动刷新。
+/// 全文 sheet(#16 → #32 时间戳模式):点句子=跳到那一刻播放;播放时当前句高亮+跟读滚动;
+/// 底部内嵌迷你播放条,拖它高亮跟着走(双向锚定)。无分段的老转写退回纯文本。
+/// 顶栏保留 重新转写/分享文字,底栏 复制全文 与播放条并存。
 private struct TranscriptView: View {
     let recordID: String
     @ObservedObject var library: RecordingLibrary
     @ObservedObject var transcriber: TranscriptionCenter
+    @ObservedObject var player: PlaybackCenter
 
     private var record: RecordingRecord? {
         library.record(id: recordID)
     }
 
+    private var fileExists: Bool {
+        FileManager.default.fileExists(atPath: library.fileURL(id: recordID).path)
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if let text = record?.transcript {
+                if let segments = record?.transcriptSegments, !segments.isEmpty {
+                    segmentList(segments)
+                } else if let text = record?.transcript {
                     ScrollView {
                         Text(text)
                             .font(.body)
@@ -751,7 +792,6 @@ private struct TranscriptView: View {
                     } label: {
                         Label("重新转写", systemImage: "arrow.clockwise")
                     }
-                    // #29:忙碌中不禁用,点按即插队
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if let text = record?.transcript {
@@ -761,14 +801,111 @@ private struct TranscriptView: View {
                     }
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    Button {
-                        UIPasteboard.general.string = record?.transcript
-                    } label: {
-                        Label("复制全文", systemImage: "doc.on.doc")
+                    HStack {
+                        Button {
+                            UIPasteboard.general.string = record?.transcript
+                        } label: {
+                            Label("复制全文", systemImage: "doc.on.doc")
+                        }
+                        .disabled(record?.transcript == nil)
+
+                        if fileExists, let record {
+                            miniPlayer(record)
+                        }
                     }
-                    .disabled(record?.transcript == nil)
                 }
             }
+        }
+    }
+
+    // MARK: - 时间戳分段(#32)
+
+    /// 正在播这条时,当前时刻落在哪个分段(最后一个 start ≤ 时刻 的段)。
+    private var currentSegmentIndex: Int? {
+        guard player.playingID == recordID,
+              let segments = record?.transcriptSegments, !segments.isEmpty
+        else { return nil }
+        var found: Int?
+        for (index, segment) in segments.enumerated() where segment.start <= player.elapsed + 0.01 {
+            found = index
+        }
+        return found
+    }
+
+    private func segmentList(_ segments: [TranscriptSegment]) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                        segmentRow(segment, isCurrent: index == currentSegmentIndex)
+                            .id(index)
+                    }
+                }
+                .padding()
+            }
+            .onChange(of: currentSegmentIndex) { _, newIndex in
+                guard let newIndex, player.isPlaying else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func segmentRow(_ segment: TranscriptSegment, isCurrent: Bool) -> some View {
+        Button {
+            guard fileExists, let record else { return }
+            player.toggle(record, fileURL: library.fileURL(id: recordID), at: segment.start)
+        } label: {
+            Text(segment.text)
+                .font(.body)
+                .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isCurrent ? Color.accentColor.opacity(0.1) : Color.clear)
+        )
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .accessibilityLabel("第 \(Int(segment.start)) 秒起：\(segment.text)")
+    }
+
+    /// 内嵌迷你播放条(#32):播放中显示 进度+拖动+倍速;闲时一枚播放钮。
+    @ViewBuilder
+    private func miniPlayer(_ record: RecordingRecord) -> some View {
+        if player.playingID == recordID {
+            HStack(spacing: 8) {
+                Button {
+                    player.toggle(record, fileURL: library.fileURL(id: recordID))
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.footnote)
+                        .frame(width: 26, height: 26)
+                }
+                Text(DayTapFormat.clock(player.elapsed))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Slider(value: Binding(
+                    get: { player.progress },
+                    set: { player.scrub(to: $0) }
+                ), in: 0...1)
+                .tint(.red)
+                Text(DayTapFormat.clock(player.duration))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 260)
+        } else {
+            Button {
+                player.toggle(record, fileURL: library.fileURL(id: recordID))
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.title3)
+            }
+            .accessibilityLabel("播放")
         }
     }
 }
@@ -878,7 +1015,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "slider.horizontal.3",
                         title: "回听与搜索",
-                        detail: "播放中进度条可拖动定位，点「1x」循环倍速（1.5x / 2x）；列表顶部可搜标题与转写全文；删除的录音进「最近删除」保留 30 天，可恢复。"
+                        detail: "播放中进度条可拖动定位，点「1x」循环倍速；列表顶部可搜标题与转写全文，命中的行点一下直达说那句话的那一刻；全文页点任意句跳播、播放时跟读高亮；删除的录音进「最近删除」保留 30 天。"
                     )
                 }
 

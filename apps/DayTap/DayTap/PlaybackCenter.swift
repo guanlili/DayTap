@@ -22,20 +22,26 @@ final class PlaybackCenter: ObservableObject {
 
     /// 同一条:播着就暂停,暂停了就续播;换一条:从头播。
     func toggle(_ record: RecordingRecord, fileURL: URL) {
+        toggle(record, fileURL: fileURL, at: 0)
+    }
+
+    /// 带定位的启停(#32):搜索命中/点句跳播用——从指定秒数起播,
+    /// 已在播的同一条则直接定位过去并确保在播。
+    func toggle(_ record: RecordingRecord, fileURL: URL, at offset: TimeInterval) {
         if playingID == record.id, let player {
-            if isPlaying {
-                player.pause()
-                isPlaying = false
-            } else {
+            if offset > 0 {
+                scrub(to: offset / max(duration, 0.1))
+            }
+            if !isPlaying {
                 player.play()
                 isPlaying = true
             }
             return
         }
-        start(record: record, fileURL: fileURL)
+        start(record: record, fileURL: fileURL, at: offset)
     }
 
-    private func start(record: RecordingRecord, fileURL: URL) {
+    private func start(record: RecordingRecord, fileURL: URL, at offset: TimeInterval = 0) {
         reset()
         let session = AVAudioSession.sharedInstance()
         // 激活失败重试一次(#28):曾出现「界面在播但无声」的一次性抖动,
@@ -68,8 +74,14 @@ final class PlaybackCenter: ObservableObject {
         playingID = record.id
         isPlaying = true
         duration = max(newPlayer.duration, 0.1)
-        elapsed = 0
-        progress = 0
+        if offset > 0 {
+            newPlayer.currentTime = min(offset, duration - 0.1)
+            elapsed = newPlayer.currentTime
+            progress = min(1, elapsed / duration)
+        } else {
+            elapsed = 0
+            progress = 0
+        }
         startTimer()
     }
 
