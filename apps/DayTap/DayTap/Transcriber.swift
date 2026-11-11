@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import FoundationModels
 import Speech
 import UIKit
 
@@ -180,9 +181,46 @@ final class TranscriptionCenter: ObservableObject {
         let trimmed = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
         fresh.transcript = trimmed.isEmpty ? nil : trimmed
         fresh.transcriptSegments = trimmed.isEmpty || segments.isEmpty ? nil : segments
+        // 转写完顺手归类(#29):本机 Foundation Models 判一个预设类别;
+        // 已有类别不覆盖(用户纠过偏);判不出/模型不可用→留未分类,不影响转写落库。
+        if fresh.transcript != nil, fresh.category == nil {
+            fresh.category = await classify(transcript: trimmed)
+        }
         fresh.updatedAt = Date()
         library.upsert(fresh)
-        DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public)")
+        DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public) category=\(fresh.category ?? "-", privacy: .public)")
+    }
+
+    // MARK: - 自动归类(#29)
+
+    /// Foundation Models 本机判一个预设类别:零用户成本、不出设备、不花钱。
+    /// 任何失败(模型不可用/答非预设/超时)都返回 nil 留「未分类」,绝不拖垮转写本体。
+    private func classify(transcript: String) async -> String? {
+        guard !transcript.isEmpty else { return nil }
+        let model = SystemLanguageModel.default
+        guard model.isAvailable else {
+            DayTapLog.transcribe.info("classify skipped: foundation models unavailable")
+            return nil
+        }
+        let list = RecordingCategory.presets.joined(separator: "、")
+        let session = LanguageModelSession(
+            model: model,
+            instructions: "你给中文语音录音分类。只从这些类别里选一个最贴切的:\(list)。只回答类别名本身,不要任何解释、标点或其他文字。"
+        )
+        do {
+            let response = try await session.respond(
+                to: "转写全文如下:\n\(String(transcript.prefix(4000)))"
+            )
+            let answer = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hit = RecordingCategory.presets.first { answer.contains($0) }
+            if hit == nil {
+                DayTapLog.transcribe.info("classify unmatched answer \(answer.prefix(20), privacy: .public)")
+            }
+            return hit
+        } catch {
+            DayTapLog.transcribe.info("classify failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 }
 

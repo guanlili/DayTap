@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 /// iPhone 上的收件箱。不做录音。
 /// 转文字(#30 零步化)：录音到位自动转全文(电量护栏在 Transcriber)；行内常显首行预览、
 /// 点预览开全文 sheet，长按「复制文字」一步复制；手动转写留作兜底。
+/// 分类(#29)：列表按天分组(日期上移到分组头,行内只留时刻);转写完自动归入预设类别,
+/// 长按「类别」纠偏,顶部 chips 单选筛选;与搜索/编辑态叠加。
 /// 分享:Track 2 交给得到大脑,或 Track 1 交给飞书妙记 / 文件 / 隔空投送到 Mac。
 /// 试听与重命名(#2):行内播放/暂停带进度;长按重命名,分享导出文件名跟随。
 /// #15 重设计:首屏只留录音本身——指南收进工具栏 ⓘ sheet,状态「出问题才说话」。
@@ -34,6 +36,8 @@ struct RecordingListView: View {
     @State private var confirmBatchDelete = false
     // 搜索(#26):标题+全文。
     @State private var query = ""
+    // 类别筛选(#29):nil=全部;与搜索叠加作用于分组前的集合。
+    @State private var categoryFilter: String?
 
     /// 正常在列的(不含回收站);搜索时再按 标题/全文 过滤。
     private var activeRecords: [RecordingRecord] {
@@ -45,12 +49,43 @@ struct RecordingListView: View {
     }
 
     private var visibleRecords: [RecordingRecord] {
+        var result = activeRecords
+        // 类别筛选(#29)与搜索叠加:先筛后搜,两者都作用于分组前的同一集合。
+        if let categoryFilter {
+            result = result.filter { $0.category == categoryFilter }
+        }
         let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !keyword.isEmpty else { return activeRecords }
-        return activeRecords.filter { record in
+        guard !keyword.isEmpty else { return result }
+        return result.filter { record in
             record.title.localizedCaseInsensitiveContains(keyword)
                 || (record.transcript?.localizedCaseInsensitiveContains(keyword) ?? false)
         }
+    }
+
+    /// 按天分组(#29):库内本就按 createdAt 倒序,顺序扫描相邻归组即为「天」分节。
+    private var groupedByDay: [(day: Date, records: [RecordingRecord])] {
+        let calendar = Calendar.current
+        var groups: [(day: Date, records: [RecordingRecord])] = []
+        for record in visibleRecords {
+            let day = calendar.startOfDay(for: record.createdAt)
+            if groups.last?.day == day {
+                groups[groups.count - 1].records.append(record)
+            } else {
+                groups.append((day, [record]))
+            }
+        }
+        return groups
+    }
+
+    /// 分组头(#29):今天/昨天/M月d日,跨年带年份;日期信息全上移到这里。
+    private func dayTitle(_ day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "今天" }
+        if calendar.isDateInYesterday(day) { return "昨天" }
+        if calendar.isDate(day, equalTo: Date(), toGranularity: .year) {
+            return day.formatted(.dateTime.month().day())
+        }
+        return day.formatted(date: .abbreviated, time: .omitted)
     }
 
     var body: some View {
@@ -270,12 +305,21 @@ struct RecordingListView: View {
                 }
             }
 
-            Section {
-                if visibleRecords.isEmpty {
+            if visibleRecords.isEmpty {
+                Section {
                     ContentUnavailableView.search(text: query)
-                } else {
-                    ForEach(visibleRecords) { record in
-                        row(record)
+                }
+            } else {
+                // 按天分组(#29):一天一节,分组头承接日期;搜索/筛选后的结果同样按天归组。
+                ForEach(groupedByDay, id: \.day) { group in
+                    Section {
+                        ForEach(group.records) { record in
+                            row(record)
+                        }
+                    } header: {
+                        Text(dayTitle(group.day))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -295,6 +339,55 @@ struct RecordingListView: View {
             }
         }
         .searchable(text: $query, prompt: "搜索录音或全文")
+        // 类别筛选 chips(#29):钉在列表上方,编辑态收起;没出现过类别就不占位。
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !isEditing {
+                categoryChips
+            }
+        }
+    }
+
+    /// 类别筛选 chips(#29):「全部」+ 库里出现过的预设类别,单选。
+    /// 与搜索、按天分组三态叠加;Apple 风格轻量,不做侧边栏/层级树。
+    @ViewBuilder
+    private var categoryChips: some View {
+        let present = RecordingCategory.presets.filter { preset in
+            activeRecords.contains { $0.category == preset }
+        }
+        if !present.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    categoryChip(nil, label: "全部")
+                    ForEach(present, id: \.self) { preset in
+                        categoryChip(preset, label: preset)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+        }
+    }
+
+    private func categoryChip(_ value: String?, label: String) -> some View {
+        let selected = categoryFilter == value
+        return Button {
+            categoryFilter = value
+        } label: {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(selected ? Color.accentColor : Color.secondary.opacity(0.12))
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("筛选\(label)")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityIdentifier("daytap.chip.\(label)")
     }
 
     /// 编辑态底栏(#25):全选 / 分享(n) / 删除(n),替代录音钮(录着时禁进编辑)。
@@ -536,7 +629,7 @@ struct RecordingListView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(record.title)
+                Text(displayTitle(record))
                     .font(.body.weight(.semibold))
                     .lineLimit(2)
                 Text(subtitle(for: record))
@@ -670,11 +763,44 @@ struct RecordingListView: View {
             Label("重命名", systemImage: "pencil")
         }
 
+        // 类别纠偏(#29):自动归类打底,这里一次点选改掉;当前类别带勾。
+        Menu {
+            ForEach(RecordingCategory.presets, id: \.self) { preset in
+                Button {
+                    setCategory(record, to: preset)
+                } label: {
+                    if record.category == preset {
+                        Label(preset, systemImage: "checkmark")
+                    } else {
+                        Text(preset)
+                    }
+                }
+            }
+            if record.category != nil {
+                Button {
+                    setCategory(record, to: nil)
+                } label: {
+                    Text("清除类别")
+                }
+            }
+        } label: {
+            Label(record.category ?? "类别", systemImage: "tag")
+        }
+
         Button(role: .destructive) {
             deletingRecord = record
         } label: {
             Label("删除", systemImage: "trash")
         }
+    }
+
+    /// 手动改类别(#29):取库内最新那条改,不覆盖传输状态的并发更新(同 commitRename 口径)。
+    /// 设为同一值不动(避免无谓的 updatedAt 刷新)。
+    private func setCategory(_ record: RecordingRecord, to category: String?) {
+        guard var fresh = library.record(id: record.id), fresh.category != category else { return }
+        fresh.category = category
+        fresh.updatedAt = Date()
+        library.upsert(fresh)
     }
 
     /// 整行与播放键共用一份启停逻辑,文件不在就提示。
@@ -740,21 +866,34 @@ struct RecordingListView: View {
         player.rate == 1.5 ? "1.5x" : (player.rate == 2.0 ? "2x" : "1x")
     }
 
+    /// 行标题(#29):起过名用名字;没起名只显时刻——日期已上移到分组头。
+    private func displayTitle(_ record: RecordingRecord) -> String {
+        if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return record.createdAt.formatted(date: .omitted, time: .shortened)
+    }
+
     private func subtitle(for record: RecordingRecord) -> String {
-        // 数字日期比「2026年11月10日」短一截,转写过的行才不至于折成两行(#19)。
-        let date = record.createdAt.formatted(date: .numeric, time: .shortened)
-        // 空壳文件(只有容器头)直接标出来,别让用户点开才发现播不了;
-        // 手机录的标来源(#3)。byteCount 已按真实落盘大小;
+        // 日期已上移到分组头(#29),这里只留时刻;空壳文件直接标出来,别让用户点开才发现播不了;
+        // 类别(#29)与手机录来源(#3)打头。byteCount 已按真实落盘大小;
         // 不写 m4a——条条都是,语音备忘录也不标格式,格式知识在指南里(#19)。
         // 转没转过不再标「已转文字」——行内预览常显本身就是状态(#30)。
-        var mark = record.origin == "phone" ? "手机录 · " : ""
+        let time = record.createdAt.formatted(date: .omitted, time: .shortened)
+        var mark = ""
+        if let category = record.category {
+            mark += "\(category) · "
+        }
+        if record.origin == "phone" {
+            mark += "手机录 · "
+        }
         if record.byteCount < 1024 {
             mark += "空录音 · "
         }
         let size = "\(DayTapFormat.clock(record.durationSeconds)) · \(DayTapFormat.bytes(record.byteCount))"
-        // 起了名的条目,标题已经是名字,这里补回时间;没起名的避免时间出现两遍。
-        if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            return "\(date) · \(mark)\(size)"
+        // 起了名的条目,标题已经是名字,这里补回时刻;没起名的避免时刻出现两遍。
+        if record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return "\(time) · \(mark)\(size)"
         }
         return mark + size
     }
@@ -1053,6 +1192,11 @@ private struct GuideSheet: View {
                         icon: "slider.horizontal.3",
                         title: "回听与搜索",
                         detail: "播放中进度条可拖动定位，点「1x」循环倍速；列表顶部可搜标题与转写全文，命中的行点一下直达说那句话的那一刻；全文页点任意句跳播、播放时跟读高亮；删除的录音进「最近删除」保留 30 天。"
+                    )
+                    guideRow(
+                        icon: "calendar",
+                        title: "按天浏览 · 类别筛选",
+                        detail: "列表自动按天分组（今天 / 昨天 / 日期）；转写完成后自动归入 会议 / 活动 / 灵感 / 日常 / 其他，长按「类别」可改；顶部按类别一键筛选。"
                     )
                 }
 

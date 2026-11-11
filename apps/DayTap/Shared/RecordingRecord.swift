@@ -47,6 +47,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 手机端软删时间(#26):nil=正常;非 nil=在「最近删除」里,30 天后自动彻底清除。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议。
     var deletedAt: Date? = nil
+    /// 主体类别(#29):nil=未分类(还没转写/判不出/被手动清除)。
+    /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机端本地判定,预设见 RecordingCategory)。
+    var category: String? = nil
 
     /// 列表标题:起了名用名字,没起名用时间。
     var title: String {
@@ -60,6 +63,12 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     var awaitsPhoneAck: Bool {
         state != .acknowledged
     }
+}
+
+/// 主体类别(#29):预设固定小集合,零维护——转写完自动归(见 Transcriber),长按可纠偏。
+/// 不做自定义类别/多标签(less is more,v2 再说);顺序即菜单与筛选 chips 的顺序。
+enum RecordingCategory {
+    static let presets = ["会议", "活动", "灵感", "日常", "其他"]
 }
 
 enum TransferKeys {
