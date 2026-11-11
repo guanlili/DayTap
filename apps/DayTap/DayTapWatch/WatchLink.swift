@@ -59,24 +59,10 @@ final class WatchLink: NSObject {
     /// 把还没被手机确认的本地文件再交一次。已经在系统队列里的不重复提交。
     /// 返回口径结果(#4):调用方据此给触觉与明确文案,不再让点击像没反应。
     @discardableResult
-    /// 手动「再传一次」的强路径(#53):先撤销系统队列里卡死的传输、清进程内提交记录,
-    /// 再从文件重新入队——系统 outbox 会整体僵死(transferFile 完成回调永不来,消息通道却活着),
-    /// 温和重试看到「已在队列」就全部跳过,表现为点了没反应。
-    /// 自动触发的轮次仍走温和路径,不乱撤正常排队的条目。
+    /// 手动「再传一次」(#53 修正):强路径只跳过「刚送出等回执」的 120s 冷却,立即重新对账入队;
+    /// **不再撤销系统队列**——撤销版(6730f03)在用户连点时会把在途传输反复杀掉重排,
+    /// 永远跑不完,新录音也被连坐,实测弊大于利。「队列僵死」实为激活闸门+瞬态文案的误诊。
     func retryPending(reason: String, force: Bool = false) -> RetryResult {
-        if force, WCSession.isSupported() {
-            let session = WCSession.default
-            let stuck = session.outstandingFileTransfers
-            if !stuck.isEmpty {
-                for transfer in stuck {
-                    transfer.cancel()
-                }
-                for transfer in stuck {
-                    clearSubmitted(transfer.file.metadata?[TransferKeys.id] as? String ?? "")
-                }
-                DayTapLog.link.info("hard requeue: cancelled \(stuck.count, privacy: .public) stuck transfers")
-            }
-        }
         // 本地整理不依赖会话状态:孤儿回收与已确认清账在任何状态下都先跑,
         // 不再被激活守卫挡住(#13 发现、#27 修)——崩溃孤儿与历史积压
         // 即使会话没激活也该入册/出册,计数立即可见。
@@ -105,7 +91,8 @@ final class WatchLink: NSObject {
                 continue
             }
             // 刚报告「系统已送出」时先等回执，避免手机还没写完又传第二份。
-            if record.state == .delivered, now.timeIntervalSince(record.updatedAt) < 120 {
+            // 手动强路径跳过这段冷却(#53 修正),其余守卫(outstanding/submitted)不动。
+            if !force, record.state == .delivered, now.timeIntervalSince(record.updatedAt) < 120 {
                 continue
             }
             if isSubmitted(record.id) {
