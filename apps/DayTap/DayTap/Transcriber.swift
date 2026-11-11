@@ -24,6 +24,8 @@ final class TranscriptionCenter: ObservableObject {
 
     init(library: RecordingLibrary) {
         self.library = library
+        // #39→#42 配置迁移:App 一启动就搬,设置页与摘要链路看到的都是新口径。
+        LLMSettings.migrateIfNeeded()
         // 电量监控默认关,打开才能读 batteryState/Level(#29 护栏)。
         UIDevice.current.isBatteryMonitoringEnabled = true
         // 插上电源那一刻,是清自动队列最自然的时机;收到新录音也立刻试一把(#29)。
@@ -218,18 +220,18 @@ final class TranscriptionCenter: ObservableObject {
         if model.isAvailable, let result = await onDeviceDigest(transcript: transcript, model: model) {
             return result
         }
-        if CloudDigestSettings.isConfigured, let result = await cloudDigest(transcript: transcript) {
+        if LLMSettings.isConfigured, let result = await cloudDigest(transcript: transcript) {
             return result
         }
-        if !model.isAvailable, !CloudDigestSettings.isConfigured {
+        if !model.isAvailable, !LLMSettings.isConfigured {
             // 不可用不是错误但也不能永远无声(实测曾 35 条静默跳过无人察觉),状态卡说一句;
             // 云端已配置且已报过具体错误的,不在这里用泛化提示覆盖。
             if case .unavailable(let reason) = model.availability {
                 DayTapLog.transcribe.info("digest unavailable: \(String(describing: reason), privacy: .public)")
             }
-            statusText = CloudDigestSettings.enabled
-                ? "转写完成；云端摘要未配全（Base URL / 模型 / API Key），未生成摘要/标题/类别"
-                : "转写完成；本机 Apple 智能不可用，未生成摘要/标题/类别（可在使用指南中配置云端摘要）"
+            statusText = LLMSettings.enabled
+                ? "转写完成；AI 模型未配全（服务商 / 模型 / API Key），未生成摘要/标题/类别"
+                : "转写完成；本机 Apple 智能不可用，未生成摘要/标题/类别（可在设置的 AI 模型里配置）"
             return nil
         }
         // 本机可用但失败且云端未配:错误已在 onDeviceDigest 的 catch 里报过,不重复。
@@ -270,58 +272,28 @@ final class TranscriptionCenter: ObservableObject {
         }
     }
 
-    /// OpenAI 兼容接口出摘要(#39):转写前 4000 字发送到用户自配的 base_url,隐私在设置页明示。
+    /// 云端出摘要(#39→#42 走 LLMClient):转写前 4000 字发送到所配服务,隐私在设置页明示。
     private func cloudDigest(transcript: String) async -> DigestResult? {
-        let base = CloudDigestSettings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: "\(base)/chat/completions"),
-              let key = CloudDigestSecrets.loadKey()
-        else {
-            statusText = "云端摘要配置无效（Base URL 或 API Key），转写不受影响"
+        guard let client = LLMClient() else {
+            statusText = "AI 模型配置无效（服务商 / 模型 / API Key），转写不受影响"
             return nil
         }
-        var request = URLRequest(url: url, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        let body: [String: Any] = [
-            "model": CloudDigestSettings.model.trimmingCharacters(in: .whitespacesAndNewlines),
-            "temperature": 0.2,
-            "messages": [
-                [
-                    "role": "system",
-                    "content": "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(字符串数组,全文提到的待办事项,每条一句,没有则空数组)。"
-                ],
-                ["role": "user", "content": String(transcript.prefix(4000))]
-            ]
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        struct Payload: Decodable {
+            var category: String?
+            var title: String?
+            var summary: String?
+            var actionItems: [String]?
+        }
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                DayTapLog.transcribe.info("cloud digest HTTP \(http.statusCode, privacy: .public)")
-                statusText = "云端摘要失败：HTTP \(http.statusCode)（转写不受影响）"
-                return nil
-            }
-            struct ChatResponse: Decodable {
-                struct Choice: Decodable {
-                    struct Message: Decodable { var content: String? }
-                    var message: Message
-                }
-                var choices: [Choice]
-            }
-            struct Payload: Decodable {
-                var category: String?
-                var title: String?
-                var summary: String?
-                var actionItems: [String]?
-            }
-            let chat = try JSONDecoder().decode(ChatResponse.self, from: data)
-            let text = (chat.choices.first?.message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let reply = try await client.chat(
+                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(字符串数组,全文提到的待办事项,每条一句,没有则空数组)。",
+                user: String(transcript.prefix(4000))
+            )
+            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
             // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
             guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
                 DayTapLog.transcribe.info("cloud digest no json in reply")
-                statusText = "云端摘要失败：回复不是有效 JSON（转写不受影响）"
+                statusText = "AI 整理失败：回复不是有效 JSON（转写不受影响）"
                 return nil
             }
             let payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
@@ -335,10 +307,34 @@ final class TranscriptionCenter: ObservableObject {
                 summary: payload.summary.flatMap { $0.isEmpty ? nil : $0 },
                 actions: actions.isEmpty ? nil : actions
             )
+        } catch let error as LLMClient.CallError {
+            DayTapLog.transcribe.info("cloud digest failed \(error.message, privacy: .public)")
+            statusText = "AI 整理失败：\(error.message)（转写不受影响）"
+            return nil
         } catch {
             DayTapLog.transcribe.info("cloud digest failed \(error.localizedDescription, privacy: .public)")
-            statusText = "云端摘要失败：\(error.localizedDescription)（转写不受影响）"
+            statusText = "AI 整理失败：\(error.localizedDescription)（转写不受影响）"
             return nil
+        }
+    }
+
+    /// 连通性测试(#42):设置页一键验配——别等第一条录音失败才发现配错。
+    static func testLLMConnection() async -> String {
+        guard let client = LLMClient() else { return "配置不全（服务商 / 模型 / API Key）" }
+        do {
+            let reply = try await client.chat(
+                system: "你是连通性测试助手。",
+                user: "请只回复两个字：正常",
+                temperature: 0
+            )
+            let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty
+                ? "服务有响应，但返回为空"
+                : "连接正常 · \(LLMSettings.provider.displayName) \(LLMSettings.model)"
+        } catch let error as LLMClient.CallError {
+            return "失败：\(error.message)"
+        } catch {
+            return "失败：\(error.localizedDescription)"
         }
     }
 
@@ -407,26 +403,118 @@ struct RecordingDigest {
     var actionItems: [String]
 }
 
-/// 云端摘要配置(#39):非机密项进 UserDefaults;语义校验集中在这里,设置页与 digest 共用。
-enum CloudDigestSettings {
-    static let enabledKey = "cloudDigest.enabled"
-    static let baseURLKey = "cloudDigest.baseURL"
-    static let modelKey = "cloudDigest.model"
+// MARK: - LLM 配置中心(#42:摘要只是第一个消费者,后续 AI 功能共用)
+
+/// 国内主流厂商预设(#42,base_url 2026-11 核实):能默认内置的不让用户输入,能选的不让填;
+/// 模型候选只是起点(各家上新快,以控制台为准),自定义输入永远兜底。
+enum LLMProviderID: String, CaseIterable, Identifiable {
+    case zhipu, ark, deepseek, moonshot, qwen, openai, custom
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .zhipu: return "智谱 GLM"
+        case .ark: return "火山方舟（豆包）"
+        case .deepseek: return "DeepSeek"
+        case .moonshot: return "Kimi（月之暗面）"
+        case .qwen: return "通义千问（阿里）"
+        case .openai: return "OpenAI"
+        case .custom: return "自定义（OpenAI 兼容）"
+        }
+    }
+
+    var presetBaseURL: String {
+        switch self {
+        case .zhipu: return "https://open.bigmodel.cn/api/paas/v4"
+        case .ark: return "https://ark.cn-beijing.volces.com/api/v3"
+        case .deepseek: return "https://api.deepseek.com/v1"
+        case .moonshot: return "https://api.moonshot.cn/v1"
+        case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        case .openai: return "https://api.openai.com/v1"
+        case .custom: return ""
+        }
+    }
+
+    var modelCandidates: [String] {
+        switch self {
+        case .zhipu: return ["glm-4-flash", "glm-4.7-flash", "glm-4.7"]
+        case .ark: return ["doubao-seed-1.6", "doubao-1.5-pro-32k"]
+        case .deepseek: return ["deepseek-chat", "deepseek-reasoner"]
+        case .moonshot: return ["kimi-latest", "kimi-k3.1-pro"]
+        case .qwen: return ["qwen-plus", "qwen-turbo", "qwen-max"]
+        case .openai: return ["gpt-4o-mini", "gpt-4.1-mini"]
+        case .custom: return []
+        }
+    }
+
+    var defaultModel: String { modelCandidates.first ?? "" }
+}
+
+/// LLM 统一存取(#42):provider/model/customBaseURL/enabled;#39 的 cloudDigest.* 启动时自动迁移。
+enum LLMSettings {
+    static let enabledKey = "llm.enabled"
+    static let providerKey = "llm.provider"
+    static let customBaseURLKey = "llm.customBaseURL"
+    static let modelKey = "llm.model"
+    private static let migratedKey = "llm.migrated"
 
     static var enabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
-    static var baseURL: String { UserDefaults.standard.string(forKey: baseURLKey) ?? "" }
-    static var model: String { UserDefaults.standard.string(forKey: modelKey) ?? "" }
 
-    /// 开关开着且三项都填了才算配全。
+    static var provider: LLMProviderID {
+        LLMProviderID(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "") ?? .zhipu
+    }
+
+    static var customBaseURL: String { UserDefaults.standard.string(forKey: customBaseURLKey) ?? "" }
+
+    /// 生效模型:选过的(含自定义)> 预设默认。
+    static var model: String {
+        let saved = UserDefaults.standard.string(forKey: modelKey) ?? ""
+        return saved.isEmpty ? provider.defaultModel : saved
+    }
+
+    static var baseURL: String {
+        provider == .custom ? customBaseURL : provider.presetBaseURL
+    }
+
+    /// 开关开着且 URL/模型/key 三样齐才算配全。
     static var isConfigured: Bool {
         enabled && !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !(CloudDigestSecrets.loadKey() ?? "").isEmpty
+            && !(LLMSecrets.loadKey() ?? "").isEmpty
+    }
+
+    /// #39→#42 迁移:旧 cloudDigest.* 按 baseURL 归入对应预设,只搬一次;
+    /// Keychain 服务名不动,已配的 key 原地继承(不迁移=丢用户配置)。
+    static func migrateIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: migratedKey) else { return }
+        defer { defaults.set(true, forKey: migratedKey) }
+        let oldBase = (defaults.string(forKey: "cloudDigest.baseURL") ?? "").lowercased()
+        let wasEnabled = defaults.bool(forKey: "cloudDigest.enabled")
+        guard wasEnabled || !oldBase.isEmpty else { return }
+        defaults.set(true, forKey: enabledKey)
+        let mapped: LLMProviderID
+        if oldBase.contains("bigmodel") { mapped = .zhipu }
+        else if oldBase.contains("volces") { mapped = .ark }
+        else if oldBase.contains("deepseek") { mapped = .deepseek }
+        else if oldBase.contains("moonshot") { mapped = .moonshot }
+        else if oldBase.contains("dashscope") { mapped = .qwen }
+        else if oldBase.contains("openai.com") { mapped = .openai }
+        else { mapped = .custom }
+        defaults.set(mapped.rawValue, forKey: providerKey)
+        if let oldModel = defaults.string(forKey: "cloudDigest.model"), !oldModel.isEmpty {
+            defaults.set(oldModel, forKey: modelKey)
+        }
+        if mapped == .custom, !oldBase.isEmpty {
+            defaults.set(oldBase, forKey: customBaseURLKey)
+        }
     }
 }
 
 /// API key 存 Keychain 不进 UserDefaults——明文会随设备备份走。最小 kSecClassGenericPassword 封装。
-enum CloudDigestSecrets {
+/// 服务名沿用 #39 的 cloudDigest 值:升级不断已配的 key。
+enum LLMSecrets {
     private static let service = "com.guanhongli.daytap.cloudDigest"
     private static let account = "apiKey"
 
@@ -457,6 +545,76 @@ enum CloudDigestSecrets {
               let data = item as? Data
         else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+/// 统一的 OpenAI 兼容对话调用(#42):摘要/标题/类别是第一个消费者,后续 AI 功能直接复用。
+struct LLMClient {
+    struct CallError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    let requestURL: URL
+    let model: String
+    private let key: String
+
+    /// 读 LLMSettings 现配;配置不全返回 nil。
+    init?() {
+        let base = LLMSettings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let model = LLMSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: "\(base)/chat/completions"),
+              !model.isEmpty,
+              let key = LLMSecrets.loadKey(), !key.isEmpty
+        else { return nil }
+        self.requestURL = url
+        self.model = model
+        self.key = key
+    }
+
+    /// 单轮对话,返回 assistant 文本;失败抛带面向用户文案的 CallError(含 HTTP 码)。
+    func chat(system: String, user: String, temperature: Double = 0.2) async throws -> String {
+        var request = URLRequest(url: requestURL, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": model,
+            "temperature": temperature,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": user]
+            ]
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw CallError(message: error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw CallError(message: "无效响应")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            DayTapLog.transcribe.info("llm HTTP \(http.statusCode, privacy: .public)")
+            throw CallError(message: "HTTP \(http.statusCode)")
+        }
+        struct ChatResponse: Decodable {
+            struct Choice: Decodable {
+                struct Message: Decodable { var content: String? }
+                var message: Message
+            }
+            var choices: [Choice]
+        }
+        guard let chat = try? JSONDecoder().decode(ChatResponse.self, from: data),
+              let text = chat.choices.first?.message.content
+        else {
+            throw CallError(message: "回复格式无效")
+        }
+        return text
     }
 }
 

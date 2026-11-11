@@ -1316,7 +1316,7 @@ private struct GuideSheet: View {
                     guideRow(
                         icon: "text.bubble",
                         title: "自动转写",
-                        detail: "录音到位自动转全文（接电源或电量充足时；首次需下载中文语音模型，之后离线；超长的可长按手动转）。转写完自动出短标题、摘要、待办和类别——长按可改名改类别，行内文字点开全文。摘要需要 Apple 智能，国行手机可在设置里配云端摘要。"
+                        detail: "录音到位自动转全文（接电源或电量充足时；首次需下载中文语音模型，之后离线；超长的可长按手动转）。转写完自动出短标题、摘要、待办和类别——长按可改名改类别，行内文字点开全文。摘要需要 Apple 智能，国行手机可在设置的 AI 模型里配置（智谱 / DeepSeek / Kimi / 通义 / 方舟等）。"
                     )
                     guideRow(
                         icon: "waveform",
@@ -1551,40 +1551,107 @@ private struct ExportSheet: View {
     }
 }
 
-/// 设置(#40):配置归设置,指南只留知识。云端摘要(#39)自指南平移至此;接口细节开关打开才出现。
+/// 设置(#40→#42):配置归设置。AI 模型节=LLM 配置中心——预设厂商可选不填、
+/// 模型候选可选+自定义兜底、key 唯一必填,配完一键连通性测试;摘要只是第一个消费者。
 private struct SettingsSheet: View {
     @ObservedObject var transcriber: TranscriptionCenter
     @Environment(\.dismiss) private var dismiss
 
-    @State private var cloudEnabled = CloudDigestSettings.enabled
-    @State private var baseURL = CloudDigestSettings.baseURL
-    @State private var model = CloudDigestSettings.model
-    @State private var apiKey = CloudDigestSecrets.loadKey() ?? ""
+    @State private var llmEnabled: Bool
+    @State private var provider: LLMProviderID
+    @State private var customBaseURL: String
+    @State private var modelSelection: String
+    @State private var customModel: String
+    @State private var apiKey: String
+    @State private var testResult: String?
+    @State private var testing = false
+
+    /// 模型 Picker 里「自定义…」的哨兵值。
+    private static let customModelTag = "__custom__"
+
+    init(transcriber: TranscriptionCenter) {
+        self.transcriber = transcriber
+        _llmEnabled = State(initialValue: LLMSettings.enabled)
+        let savedProvider = LLMSettings.provider
+        let savedModel = LLMSettings.model
+        _provider = State(initialValue: savedProvider)
+        _customBaseURL = State(initialValue: LLMSettings.customBaseURL)
+        if savedProvider.modelCandidates.contains(savedModel) {
+            _modelSelection = State(initialValue: savedModel)
+            _customModel = State(initialValue: "")
+        } else {
+            _modelSelection = State(initialValue: Self.customModelTag)
+            _customModel = State(initialValue: savedModel)
+        }
+        _apiKey = State(initialValue: LLMSecrets.loadKey() ?? "")
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("云端摘要", isOn: $cloudEnabled)
+                    Toggle("启用 AI 整理", isOn: $llmEnabled)
                 } header: {
-                    Text("转写整理")
+                    Text("AI 模型")
                 } footer: {
-                    Text("本机 Apple 智能不可用时的可选兜底（国行目前不支持），本机可用时始终优先本机。启用后转写文字将发送到你配置的服务，生成摘要/标题/类别。")
+                    Text("配置一次，摘要、标题、类别与后续 AI 功能共用。本机 Apple 智能可用时始终优先本机；启用后转写文字将发送到所选服务。")
                 }
 
-                // 接口细节开关开着才出现(#40 渐进披露):没开兜底的人不该看见三个输入框。
-                if cloudEnabled {
-                    Section("接口（OpenAI 兼容）") {
-                        TextField("Base URL", text: $baseURL, prompt: Text("如 https://open.bigmodel.cn/api/paas/v4"))
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("模型", text: $model, prompt: Text("如 glm-4-flash"))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                // 接口细节开关开着才出现(#40 渐进披露)。
+                if llmEnabled {
+                    Section {
+                        Picker("服务商", selection: $provider) {
+                            ForEach(LLMProviderID.allCases) { Text($0.displayName).tag($0) }
+                        }
+
+                        if provider == .custom {
+                            TextField("Base URL（OpenAI 兼容）", text: $customBaseURL, prompt: Text("https://…/v1"))
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+
+                        Picker("模型", selection: $modelSelection) {
+                            ForEach(provider.modelCandidates, id: \.self) { Text($0).tag($0) }
+                            Text("自定义…").tag(Self.customModelTag)
+                        }
+                        if modelSelection == Self.customModelTag {
+                            TextField("模型名（以控制台为准）", text: $customModel)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+
                         SecureField("API Key", text: $apiKey)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+
+                        Button {
+                            // 测的是当前表单值:先保存再测,所见即所测。
+                            persist()
+                            testing = true
+                            testResult = nil
+                            Task {
+                                testResult = await TranscriptionCenter.testLLMConnection()
+                                testing = false
+                            }
+                        } label: {
+                            HStack {
+                                Label("测试连通性", systemImage: "bolt.horizontal")
+                                if testing {
+                                    Spacer()
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                        }
+                        .disabled(testing)
+                        if let testResult {
+                            Text(testResult)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } footer: {
+                        Text("模型候选只是起点，各家上新快，以控制台为准，选「自定义…」可填任意型号。")
                     }
 
                     Section {
@@ -1620,17 +1687,27 @@ private struct SettingsSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") {
-                        let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-                        UserDefaults.standard.set(cloudEnabled, forKey: CloudDigestSettings.enabledKey)
-                        UserDefaults.standard.set(trimmedBase, forKey: CloudDigestSettings.baseURLKey)
-                        UserDefaults.standard.set(trimmedModel, forKey: CloudDigestSettings.modelKey)
-                        CloudDigestSecrets.saveKey(apiKey)
+                        persist()
                         dismiss()
                     }
                 }
             }
+            .onChange(of: provider) { _, newProvider in
+                // 换厂商,模型候选跟随重置;自定义模型名清空待填。
+                modelSelection = newProvider.defaultModel.isEmpty ? Self.customModelTag : newProvider.defaultModel
+                customModel = ""
+            }
         }
+    }
+
+    private func persist() {
+        let defaults = UserDefaults.standard
+        let model = modelSelection == Self.customModelTag ? customModel : modelSelection
+        defaults.set(llmEnabled, forKey: LLMSettings.enabledKey)
+        defaults.set(provider.rawValue, forKey: LLMSettings.providerKey)
+        defaults.set(customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: LLMSettings.customBaseURLKey)
+        defaults.set(model.trimmingCharacters(in: .whitespacesAndNewlines), forKey: LLMSettings.modelKey)
+        LLMSecrets.saveKey(apiKey)
     }
 }
 
