@@ -30,14 +30,23 @@ final class PlaybackCenter: ObservableObject {
         toggle(record, fileURL: fileURL, at: 0)
     }
 
-    /// 带定位的启停(#32):搜索命中/点句跳播用——从指定秒数起播,
-    /// 已在播的同一条则直接定位过去并确保在播。
+    /// 带定位的启停(#32→#55 修回归):带 offset(搜索命中/点句跳播)=定位并确保在播;
+    /// 不带 offset(行/播放键/迷你条)=真·启停切换——暂停分支在 #32 重构时丢失,
+    /// 表现为"播着点暂停没反应"。
     func toggle(_ record: RecordingRecord, fileURL: URL, at offset: TimeInterval) {
         if playingID == record.id, let player {
             if offset > 0 {
                 scrub(to: offset / max(duration, 0.1))
+                if !isPlaying {
+                    player.play()
+                    isPlaying = true
+                }
+                return
             }
-            if !isPlaying {
+            if isPlaying {
+                player.pause()
+                isPlaying = false
+            } else {
                 player.play()
                 isPlaying = true
             }
