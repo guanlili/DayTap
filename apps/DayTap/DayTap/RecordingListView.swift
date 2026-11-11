@@ -747,6 +747,28 @@ struct RecordingListView: View {
                     .tint(Color.secondary)
                     .accessibilityLabel("查看全文")
                     .accessibilityIdentifier("daytap.preview.\(record.id)")
+                } else if transcriber.autoFailedIDs.contains(record.id) {
+                    // #44:失败行内可见——之前只有顶部一条全局横幅,看不出哪条坏了。
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.orange)
+                        Text("转写失败 · 左滑「转文字」重试")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("daytap.failed.\(record.id)")
+                } else if record.transcribedAt != nil {
+                    // #44:转过但没内容(如敲桌误触发的环境音)——不是坏了,别让用户以为坏了。
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform.slash")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary)
+                        Text("无语音内容")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("daytap.silent.\(record.id)")
                 }
 
                 if active {

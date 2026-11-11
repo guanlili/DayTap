@@ -53,6 +53,10 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 转写摘要(#35):本机 Foundation Models 出的 ≤3 句摘要。派生内容,重新转写会重生成。
     /// 可选字段,旧 index 解码 nil 兼容;不进手表协议。
     var summary: String? = nil
+    /// 最近一次转写完成时间(#44):nil=还没转过;非 nil 且 transcript 为 nil=转了但没内容
+    /// (比如误触发录了段环境音)——UI 标「无语音内容」,自动队列也不再反复重试。
+    /// 可选字段,旧 index 解码 nil 兼容;不进手表协议。
+    var transcribedAt: Date? = nil
     /// 摘要卡待办清单(#35):每条一行短句。派生内容,同 summary 口径。
     var actionItems: [String]? = nil
     /// 自动内容短标题(#36):≤12 字,转写完由摘要链路顺手生成;展示优先级 手动名>autoTitle>时刻。

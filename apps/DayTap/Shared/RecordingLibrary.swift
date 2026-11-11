@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -54,6 +55,13 @@ final class RecordingLibrary: ObservableObject {
             }
             var stored = record
             stored.byteCount = fileSize(at: destination) ?? record.byteCount
+            // #44:手表偶发传来 duration=0 但音频真实存在(33KB/0s 案)——按落盘文件实测时长兜底。
+            if stored.durationSeconds < 1,
+               let player = try? AVAudioPlayer(contentsOf: destination),
+               player.duration > 1
+            {
+                stored.durationSeconds = player.duration
+            }
             stored.state = .acknowledged
             stored.lastError = nil
             stored.updatedAt = Date()

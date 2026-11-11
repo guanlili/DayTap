@@ -19,8 +19,8 @@ final class TranscriptionCenter: ObservableObject {
 
     private let library: RecordingLibrary
     /// 本次会话自动转写失败的 id:不再自动重试(退回手动),防失败死循环刷屏。
-    /// 会话级记忆——重启 App 后可再试一轮。
-    private var autoFailedIDs: Set<String> = []
+    /// 会话级记忆——重启 App 后可再试一轮;@Published 让失败行自己亮出来(#44)。
+    @Published private(set) var autoFailedIDs: Set<String> = []
 
     init(library: RecordingLibrary) {
         self.library = library
@@ -80,10 +80,13 @@ final class TranscriptionCenter: ObservableObject {
         }
     }
 
-    /// 一条转完:有手动插队先转它;刚这条没出全文=失败,记入会话级失败名单防自动死循环;
+    /// 一条转完:有手动插队先转它;真失败(transcript 没出且 transcribedAt 也没盖——
+    /// 盖了=转完了只是没内容,那是「无语音内容」不是失败)记入会话级失败名单防自动死循环;
     /// 然后继续清队列。
     private func afterCompletion(id: String) {
-        if library.record(id: id)?.transcript == nil {
+        if let record = library.record(id: id),
+           record.transcript == nil, record.transcribedAt == nil
+        {
             autoFailedIDs.insert(id)
         }
         if let next = pendingManualID, let record = library.record(id: next) {
@@ -96,12 +99,13 @@ final class TranscriptionCenter: ObservableObject {
 
     // MARK: - 自动转全文(#29)
 
-    /// 自动队列条件:在列(未软删)、没转过、本次会话没失败过、音频在、
-    /// 时长 ≤2h(超长留给手动,内存/耗时护栏)。
+    /// 自动队列条件:在列(未软删)、没转过(转了没内容的也不重试,#44)、本次会话没失败过、
+    /// 音频在、时长 ≤2h(超长留给手动,内存/耗时护栏)。
     private func autoCandidates() -> [RecordingRecord] {
         library.snapshot().filter { record in
             record.deletedAt == nil
                 && record.transcript == nil
+                && record.transcribedAt == nil
                 && !autoFailedIDs.contains(record.id)
                 && record.byteCount >= 1024
                 && record.durationSeconds <= 7200
@@ -184,6 +188,9 @@ final class TranscriptionCenter: ObservableObject {
         let trimmed = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
         fresh.transcript = trimmed.isEmpty ? nil : trimmed
         fresh.transcriptSegments = trimmed.isEmpty || segments.isEmpty ? nil : segments
+        // #44:转写跑完就盖时间戳——空结果从此可区分「没转过」与「无语音内容」,
+        // 自动队列不再把空内容当失败反复重试。
+        fresh.transcribedAt = Date()
         // 转写完顺手出摘要卡(#35)+短标题(#36)+类别(#29):一次调用三件事;
         // 类别被用户纠偏过的不覆盖;摘要/标题是派生内容,重新转写就重生成;
         // 模型不可用→全留 nil(未分类/时刻名),不影响转写落库。

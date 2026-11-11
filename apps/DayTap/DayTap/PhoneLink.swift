@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import WatchConnectivity
@@ -29,6 +30,26 @@ final class PhoneLink: NSObject, ObservableObject {
         super.init()
         // 回收站到期清扫(#26):30 天前的软删条目连文件一起真正清掉。
         library.purgeExpiredDeleted(retention: 30 * 24 * 3600)
+        // #44:存量空时长异常(手表传过 33KB/0s 案)——按音频文件实测时长修复,只修有真实音频的。
+        repairZeroDurations()
+    }
+
+    /// #44:durations <1s 但音频文件在且可读的,用 AVAudioPlayer 实测时长回填。
+    /// 与 importAudio 的入口兜底同口径,这里管的是已经进过库的存量。
+    private func repairZeroDurations() {
+        for record in library.snapshot() where record.durationSeconds < 1 {
+            let url = library.fileURL(id: record.id)
+            guard record.byteCount >= 1024,
+                  FileManager.default.fileExists(atPath: url.path),
+                  let player = try? AVAudioPlayer(contentsOf: url),
+                  player.duration > 1,
+                  var fresh = library.record(id: record.id)
+            else { continue }
+            fresh.durationSeconds = player.duration
+            fresh.updatedAt = Date()
+            library.upsert(fresh)
+            DayTapLog.library.info("repaired duration \(record.id, privacy: .public) -> \(Int(player.duration), privacy: .public)s")
+        }
     }
 
     /// 手机端删除入口(#20→#26):先记防复活名单,再软删进「最近删除」(30 天可恢复)。
