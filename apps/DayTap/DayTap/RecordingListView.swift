@@ -669,7 +669,10 @@ struct RecordingListView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    // iOS 26 borderless 按钮会把 tint 强加给 label,单靠 foregroundStyle 压不住;
+                    // 预览是内容不是操作,从 tint 源头改成次要色(实测验证过的写法)。
                     .buttonStyle(.borderless)
+                    .tint(Color.secondary)
                     .accessibilityLabel("查看全文")
                     .accessibilityIdentifier("daytap.preview.\(record.id)")
                 }
