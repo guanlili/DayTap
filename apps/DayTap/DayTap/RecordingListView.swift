@@ -205,8 +205,15 @@ struct RecordingListView: View {
             )
         }
         .sheet(item: $shareRecord) { record in
-            ActivityShareSheet(url: library.fileURL(id: record.id))
-                .ignoresSafeArea()
+            // #34:分享走带名副本(名字/时间戳),不再让接收方看到 UUID;「存到文件」同源。
+            if let url = link.shareFileURL(for: record) {
+                ActivityShareSheet(url: url)
+                    .ignoresSafeArea()
+            } else {
+                Text("找不到这条音频文件")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            }
         }
         .sheet(isPresented: Binding(
             get: { !(batchShareURLs ?? []).isEmpty },
@@ -456,9 +463,27 @@ struct RecordingListView: View {
     }
 
     private func shareSelected() {
-        let urls = selectedIDs.compactMap { id -> URL? in
-            let url = library.fileURL(id: id)
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        // #34 同根因:批量分享也走带名副本;两条同名(如两条「晨会」)加序号防覆盖。
+        var urls: [URL] = []
+        var usedNames: Set<String> = []
+        for id in selectedIDs {
+            guard let record = library.record(id: id),
+                  let url = link.shareFileURL(for: record)
+            else { continue }
+            var finalURL = url
+            if usedNames.contains(url.lastPathComponent) {
+                let stem = url.deletingPathExtension().lastPathComponent
+                let ext = url.pathExtension
+                var index = 2
+                while usedNames.contains("\(stem)-\(index).\(ext)") { index += 1 }
+                let renamed = url.deletingLastPathComponent().appendingPathComponent("\(stem)-\(index).\(ext)")
+                try? FileManager.default.removeItem(at: renamed)
+                if (try? FileManager.default.copyItem(at: url, to: renamed)) != nil {
+                    finalURL = renamed
+                }
+            }
+            usedNames.insert(finalURL.lastPathComponent)
+            urls.append(finalURL)
         }
         guard !urls.isEmpty else {
             banner = "选中的录音找不到音频文件"
