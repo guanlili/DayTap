@@ -8,8 +8,6 @@ struct TransferSheet: View {
     @ObservedObject var model: WatchModel
     @State private var confirmDiscard = false
 
-    /// 与主屏角标同源(#46),失败行/原因沿用这枚橙。
-    private let badgeOrange = Color(red: 255 / 255, green: 149 / 255, blue: 0 / 255)
 
     var body: some View {
         ScrollView {
@@ -55,7 +53,7 @@ struct TransferSheet: View {
                 if model.transferFailed > 0, let error = model.transferError {
                     Text(error)
                         .font(.system(size: 11))
-                        .foregroundStyle(badgeOrange)
+                        .foregroundStyle(Color.daytapBadgeOrange)
                         .lineLimit(2)
                 }
             }
@@ -76,7 +74,7 @@ struct TransferSheet: View {
             Spacer()
             Text("\(value)")
                 .monospacedDigit()
-                .foregroundStyle(highlighted ? badgeOrange : Color.primary)
+                .foregroundStyle(highlighted ? Color.daytapBadgeOrange : Color.primary)
         }
         .font(.caption)
     }

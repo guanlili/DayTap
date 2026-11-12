@@ -46,6 +46,18 @@ final class TranscriptionCenter: ObservableObject {
     }
 
     /// 手动「转文字」:空闲立即转,忙着就把这条插到自动队列最前(手动优先,#29)。
+    /// 重新转写(#61 修正):先清派生字段(摘要/短题/待办)再走常规转写——
+    /// digest 只在三字段有 nil 时跑,不清的话「重新转写」对已出全摘要的旧件是空操作,
+    /// 0b1f78a 承诺的「错截止自愈」就没有出口。类别是用户纠偏过的,保留。
+    func retranscribe(_ record: RecordingRecord) {
+        var stale = record
+        stale.summary = nil
+        stale.autoTitle = nil
+        stale.actionItems = nil
+        library.upsert(stale)
+        transcribe(record)
+    }
+
     func transcribe(_ record: RecordingRecord) {
         if activeID == nil {
             start(record)
@@ -206,7 +218,10 @@ final class TranscriptionCenter: ObservableObject {
             }
             fresh.autoTitle = result?.title
             fresh.summary = result?.summary
-            fresh.actionItems = result?.actions
+            // #62:双引擎失败(result=nil)不清已有待办——原实现会把用户勾选态连条目一起蒸发。
+            if let actions = result?.actions {
+                fresh.actionItems = actions
+            }
         }
         fresh.updatedAt = Date()
         library.upsert(fresh)
@@ -228,6 +243,7 @@ final class TranscriptionCenter: ObservableObject {
     static var todayContext: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
+        formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy年M月d日 EEEE"
         return "今天是\(formatter.string(from: Date()))。"
     }
@@ -265,24 +281,25 @@ final class TranscriptionCenter: ObservableObject {
         )
         do {
             let response = try await session.respond(
-                to: Self.todayContext + "转写全文如下:\n\(String(transcript.prefix(4000)))",
+                to: Self.todayContext + "\n转写全文如下:\n\(String(transcript.prefix(4000)))",
                 generating: RecordingDigest.self
             )
             let raw = response.content
             let category = RecordingCategory.presets.first { raw.category.contains($0) }
             let title = raw.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let summary = raw.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            let texts = raw.actionItems
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            // #61:截止时间与待办 zip 对齐(短了补 nil),AI 没给或格式不对就是无时间。
+            // #62:先按下标配对再过滤空串——原实现过滤 text 不过滤 deadline,
+            // 模型输出中间空串时其后所有截止时间整体左移挂错人。
             let deadlines = raw.actionDeadlines
-            let actions = texts.enumerated().map { index, text in
-                ActionItem(
-                    text: text,
-                    dueAt: index < deadlines.count ? ActionItem.parseDue(deadlines[index]) : nil
-                )
+            let paired = raw.actionItems.enumerated().compactMap { index, rawText -> ActionItem? in
+                let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                let due = index < deadlines.count ? ActionItem.parseDue(deadlines[index]) : nil
+                return ActionItem(text: text, dueAt: due)
             }
+            // 同文去重(#62):转写重复口述会让 AI 出两条一样的待办,text 即 id,撞则行为未定义。
+            var seen = Set<String>()
+            let actions = paired.filter { seen.insert($0.text).inserted }
             if category == nil {
                 DayTapLog.transcribe.info("digest unmatched category \(raw.category.prefix(10), privacy: .public)")
             }
@@ -345,10 +362,12 @@ final class TranscriptionCenter: ObservableObject {
             }
             let payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
             let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
+            var seen = Set<String>()
             let actions = (payload.actionItems ?? [])
                 .compactMap { raw -> ActionItem? in
                     guard let text = raw.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !text.isEmpty
+                          !text.isEmpty,
+                          seen.insert(text).inserted  // 同文去重(#62)
                     else { return nil }
                     return ActionItem(text: text, dueAt: raw.due.flatMap(ActionItem.parseDue))
                 }

@@ -56,7 +56,9 @@ final class PlaybackCenter: ObservableObject {
     }
 
     private func start(record: RecordingRecord, fileURL: URL, at offset: TimeInterval = 0) {
-        reset()
+        // #60 遗留:切条只停播放器,不再整场 reset——原实现每次切条都向系统广播一次
+        // 「我停了」再立刻重激活,别的音频 App 会被无谓打断。
+        stopPlayer()
         let session = AVAudioSession.sharedInstance()
         // 激活失败重试一次(#28):曾出现「界面在播但无声」的一次性抖动,
         // 会话没激活成功时 play() 只是空转;失败两次才放弃并落日志。
@@ -74,6 +76,8 @@ final class PlaybackCenter: ObservableObject {
             DayTapLog.library.error("playback load failed \(record.id, privacy: .public)")
             // 空壳/损坏文件加载失败不再静默:手表端曾经发出过只有容器头的录音,点试听毫无反应(#17)。
             loadError = "这条音频打不开（文件是空的或已损坏）。新版手表不再发送这类录音，这条可以从列表忽略。"
+            // 会话可能刚被激活,失败路径要熄掉——否则占着播放类别直到退后台(#60 遗留)。
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
             return
         }
         loadError = nil
@@ -139,6 +143,19 @@ final class PlaybackCenter: ObservableObject {
         loadError = nil
         activeSegments = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
+    /// 停播放器但不动音频会话(切条用);会话熄灭只归 reset()(真正收摊)。
+    private func stopPlayer() {
+        player?.stop()
+        player = nil
+        playingID = nil
+        isPlaying = false
+        progress = 0
+        elapsed = 0
+        duration = 0
+        loadError = nil
+        activeSegments = nil
     }
 
     private func startTimer() {

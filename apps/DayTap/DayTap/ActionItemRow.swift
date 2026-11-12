@@ -18,17 +18,34 @@ enum SystemInterop {
         reminder.title = text
         reminder.notes = "来自 DayTap 录音"
         if let due {
-            reminder.dueDateComponents = Calendar.current.dateComponents(
+            // #62:组件要带上 calendar——无日历的 DateComponents 历史上按 GMT 解释,+8 区会偏 8 小时。
+            var components = Calendar.current.dateComponents(
                 [.year, .month, .day, .hour, .minute], from: due
             )
+            components.calendar = .current
+            reminder.dueDateComponents = components
         }
         reminder.calendar = store.defaultCalendarForNewReminders()
         try store.save(reminder, commit: true)
     }
 
+    /// 日历写入权限前置(#62):面板自己不定权限——被拒过的设备上直接弹面板=空白怪象,
+    /// 先把「仅写入」请求做了,拒绝走 feedback 通道。
+    static func requestCalendarWriteAccess() async -> Bool {
+        let store = EKEventStore()
+        return await withCheckedContinuation { continuation in
+            store.requestWriteOnlyAccessToEvents { ok, _ in continuation.resume(returning: ok) }
+        }
+    }
+
     /// 预填好的日历事件编辑面板:标题/来源备注/截止时间就位,用户过目改时间后自己点添加。
-    static func makeEventEditor(title: String, source: String, due: Date?) -> EventEditor {
-        EventEditor(title: title, source: source, due: due)
+    static func makeEventEditor(
+        title: String,
+        sourceTitle: String,
+        due: Date?,
+        onDismiss: (() -> Void)? = nil
+    ) -> EventEditor {
+        EventEditor(title: title, sourceTitle: sourceTitle, due: due, onDismiss: onDismiss)
     }
 
     enum InteropError: LocalizedError {
@@ -39,18 +56,20 @@ enum SystemInterop {
         }
     }
 
-    /// EKEventEditViewController 的 SwiftUI 包装:present 由根控制器承担。
+    /// EKEventEditViewController 的 SwiftUI 包装:嵌在 SwiftUI sheet 里呈现。
     struct EventEditor: UIViewControllerRepresentable {
         let title: String
-        let source: String
+        let sourceTitle: String
         let due: Date?
+        var onDismiss: (() -> Void)?
 
         func makeUIViewController(context: Context) -> EKEventEditViewController {
             let editor = EKEventEditViewController()
             let store = EKEventStore()
             let event = EKEvent(eventStore: store)
             event.title = title
-            event.notes = "来自 DayTap 录音「\(source)」"
+            // 备注用显示名(#62):原来写 UUID,用户日历里看到无意义串。
+            event.notes = "来自 DayTap 录音「\(sourceTitle)」"
             // 没识别出截止就默认下个整点+1 小时,面板里用户随手改。
             let start = due ?? Calendar.current.nextDate(
                 after: Date(), matching: DateComponents(minute: 0), matchingPolicy: .nextTime
@@ -65,22 +84,34 @@ enum SystemInterop {
 
         func updateUIViewController(_ uiViewController: EKEventEditViewController, context: Context) {}
 
-        func makeCoordinator() -> Coordinator { Coordinator() }
+        func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
 
+        /// #62:面板关闭不能只靠 UIKit dismiss——SwiftUI 的 $showEventEditor 可能不复位,
+        /// 二次打开(true→true)就失灵。Coordinator 回调先把绑定复位。
         final class Coordinator: NSObject, EKEventEditViewDelegate {
-            func eventEditViewController(_ controller: EKEventEditViewController, didCompleteWith action: EKEventEditViewAction) {
+            let onDismiss: (() -> Void)?
+
+            init(onDismiss: (() -> Void)?) {
+                self.onDismiss = onDismiss
+            }
+
+            func eventEditViewController(
+                _ controller: EKEventEditViewController,
+                didCompleteWith action: EKEventEditViewAction
+            ) {
+                onDismiss?()
                 controller.dismiss(animated: true)
             }
         }
     }
 }
 
-/// 待办行(#61):轻点=完成态勾选划线;尾部菜单=添加到提醒事项(默认)/日历/复制。
-/// 摘要卡与本周回顾共用。完成态写回索引(手动操作永远赢过 AI 重识别)。
+/// 待办行(#61/#62):轻点=完成态勾选划线;尾部菜单=添加到提醒事项(默认)/日历/复制。
+/// item 只读——勾选经 onToggleDone 落库,刷新由宿主的库观察驱动(不再依赖绑定可写)。
 struct ActionItemRow: View {
-    let recordID: String
-    @Binding var item: ActionItem
-    /// 完成态落库回调(由宿主视图改库后触发刷新)。
+    let item: ActionItem
+    /// 日历事件备注里的来源显示名(录音标题)。
+    let sourceTitle: String
     let onToggleDone: (ActionItem) -> Void
     /// 行内结果反馈(添加成功/失败的一行小字)。
     @Binding var feedback: String
@@ -91,8 +122,10 @@ struct ActionItemRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             Button {
-                item.isDone.toggle()
-                onToggleDone(item)
+                // .constant 绑定写不进去(#62 教训):本地翻转后交给落库回调,UI 由库刷新。
+                var updated = item
+                updated.isDone.toggle()
+                onToggleDone(updated)
             } label: {
                 Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
                     .font(.caption2)
@@ -107,9 +140,9 @@ struct ActionItemRow: View {
                 .foregroundStyle(item.isDone ? Color.secondary : Color.primary)
 
             if let due = item.dueAt {
-                Text(due.formatted(date: .abbreviated, time: .shortened))
+                Text(dueLabel(due))
                     .font(.caption2)
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(due > Date() ? Color.orange : Color.secondary)
             }
 
             Spacer(minLength: 4)
@@ -121,7 +154,13 @@ struct ActionItemRow: View {
                     Label("添加到提醒事项", systemImage: "checklist")
                 }
                 Button {
-                    showEventEditor = true
+                    Task {
+                        guard await SystemInterop.requestCalendarWriteAccess() else {
+                            feedback = "没有日历权限——设置里允许后可用"
+                            return
+                        }
+                        showEventEditor = true
+                    }
                 } label: {
                     Label("添加到日历", systemImage: "calendar")
                 }
@@ -155,17 +194,29 @@ struct ActionItemRow: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text(dueMessage)
+            Text(confirmMessage)
         }
         .sheet(isPresented: $showEventEditor) {
-            SystemInterop.makeEventEditor(title: item.text, source: recordID, due: item.dueAt)
-                .ignoresSafeArea()
+            SystemInterop.makeEventEditor(
+                title: item.text,
+                sourceTitle: sourceTitle,
+                due: item.dueAt,
+                onDismiss: { showEventEditor = false }
+            )
+            .ignoresSafeArea()
         }
     }
 
-    private var dueMessage: String {
-        if let due = item.dueAt {
-            return "「\(item.text)」" + (due > Date() ? "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）" : "")
+    /// 过期口径统一(#62):行尾与弹窗都说「已过期 M月d日」,不再一处照常橙显一处隐去。
+    private func dueLabel(_ due: Date) -> String {
+        due > Date()
+            ? due.formatted(date: .abbreviated, time: .shortened)
+            : "已过期 " + due.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var confirmMessage: String {
+        if let due = item.dueAt, due > Date() {
+            return "「\(item.text)」（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
         }
         return "「\(item.text)」"
     }

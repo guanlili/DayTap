@@ -43,6 +43,7 @@ struct ReviewSheet: View {
         else { return }
         items[index] = updated
         fresh.actionItems = items
+        fresh.updatedAt = Date()  // 勾选也是变更(#62)
         library.upsert(fresh)
     }
 
@@ -102,14 +103,19 @@ struct ReviewSheet: View {
                                         .font(.subheadline.weight(.semibold))
                                     ForEach(group.items) { item in
                                         ActionItemRow(
-                                            recordID: group.recordID,
-                                            item: .constant(item),
+                                            item: item,
+                                            sourceTitle: group.title,
                                             onToggleDone: { updated in toggleDone(group.recordID, updated) },
                                             feedback: $reviewFeedback
                                         )
                                     }
                                 }
                                 .padding(.vertical, 2)
+                            }
+                            if !reviewFeedback.isEmpty {
+                                Text(reviewFeedback)
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.secondary)
                             }
                         }
                     }

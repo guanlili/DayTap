@@ -13,7 +13,7 @@ struct TranscriptView: View {
     @ObservedObject var transcriber: TranscriptionCenter
     @ObservedObject var player: PlaybackCenter
 
-    /// 完成态落库(#61):手动操作永远赢——写回索引,下次 AI 重识别也不会覆盖非空字段。
+    /// 完成态落库(#61/#62):手动勾选写回索引;重新转写会整体重算待办(勾选重置),类别纠偏保留。
     private func toggleDone(_ updated: ActionItem) {
         guard var fresh = library.record(id: recordID),
               var items = fresh.actionItems,
@@ -21,6 +21,7 @@ struct TranscriptView: View {
         else { return }
         items[index] = updated
         fresh.actionItems = items
+        fresh.updatedAt = Date()  // 勾选也是变更(#62):CloudSync 增量按 updatedAt 判脏
         library.upsert(fresh)
     }
 
@@ -64,7 +65,7 @@ struct TranscriptView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         if let record {
-                            transcriber.transcribe(record)
+                            transcriber.retranscribe(record)
                         }
                     } label: {
                         Label("重新转写", systemImage: "arrow.clockwise")
@@ -120,8 +121,8 @@ struct TranscriptView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(actions) { item in
                             ActionItemRow(
-                                recordID: recordID,
-                                item: .constant(item),
+                                item: item,
+                                sourceTitle: record?.title ?? recordID,
                                 onToggleDone: { toggleDone($0) },
                                 feedback: $actionFeedback
                             )
@@ -160,6 +161,7 @@ struct TranscriptView: View {
                 if let due = item.dueAt {
                     line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
                 }
+                if item.isDone { line += " ✓" }
                 return line
             }.joined(separator: "\n"))
         }

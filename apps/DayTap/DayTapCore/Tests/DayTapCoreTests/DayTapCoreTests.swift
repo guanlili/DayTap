@@ -299,7 +299,7 @@ func testParseDueFormats() {
 
 /// 含截止时间的新格式与裸串混排也各自归位。
 func testActionItemMixedArrayDecodes() throws {
-    let json = #"[{"text":"发货","due":null,"isDone":false},"旧样式"]"#
+    let json = #"[{"text":"发货","dueAt":null,"isDone":false},"旧样式"]"#
     let items = try JSONDecoder().decode([ActionItem].self, from: Data(json.utf8))
     XCTAssertEqual(items.map(\.text), ["发货", "旧样式"])
 }

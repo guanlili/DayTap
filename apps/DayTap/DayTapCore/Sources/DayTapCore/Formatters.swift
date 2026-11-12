@@ -22,12 +22,17 @@ enum DayTapFormat {
     }
 
     /// 分享出去时用的文件名，方便在得到或文件 App 里辨认。不参与传输协议。
-    static func shareFilename(createdAt: Date) -> String {
+    /// formatter 静态缓存(iOS 7+ NSDateFormatter 线程安全):原每次调用新建。
+    private static let shareFilenameFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "DayTap-\(formatter.string(from: createdAt)).m4a"
+        return formatter
+    }()
+
+    static func shareFilename(createdAt: Date) -> String {
+        "DayTap-\(shareFilenameFormatter.string(from: createdAt)).m4a"
     }
 
     /// 分享文件名(#2):重命名过的跟名字走,没起名退回时间戳。斜杠换掉,避免被当成路径。

@@ -19,8 +19,6 @@ struct RecordingScreen: View {
     /// savedFlash 序号(#59):0.35s 内二次停录时,旧闭包不掐灭新一闪。
     @State private var flashToken = 0
 
-    /// #46 角标专用橙(#FF9500),失败与待传同色——不换位置、不加句子。
-    private let badgeOrange = Color(red: 255 / 255, green: 149 / 255, blue: 0 / 255)
 
     var body: some View {
         ZStack {
@@ -175,7 +173,7 @@ struct RecordingScreen: View {
                             .monospacedDigit()
                     } else {
                         Circle()
-                            .fill(badgeOrange)
+                            .fill(Color.daytapBadgeOrange)
                             .frame(width: 6, height: 6)
                         Image(systemName: "arrow.up")
                             .font(.system(size: 9, weight: .bold))
@@ -186,7 +184,7 @@ struct RecordingScreen: View {
                         }
                     }
                 }
-                .foregroundStyle(badgeOrange)
+                .foregroundStyle(Color.daytapBadgeOrange)
                 // #59:热区扩到 44×44(watchOS HIG 最小可点目标);内衬 8+外衬 6=视觉仍钉 14pt 内缩。
                 .padding(8)
                 .frame(minWidth: 44, minHeight: 44, alignment: .topLeading)

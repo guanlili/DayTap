@@ -48,7 +48,9 @@ struct ActionItem: Codable, Equatable, Identifiable {
     /// 空/格式不对一律 nil——识别失败不添乱。
     static func parseDue(_ raw: String) -> Date? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
+        // 只吃两种规范长度(#62):yyyy-MM-dd(10) 与 yyyy-MM-dd HH:mm(16)——
+        // 带秒/五位年份等畸形输入静默拒绝,不猜。
+        guard trimmed.count == 10 || trimmed.count == 16 else { return nil }
         let minuteFormatter = DateFormatter()
         minuteFormatter.locale = Locale(identifier: "en_US_POSIX")
         minuteFormatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -142,12 +144,13 @@ enum TransferKeys {
     static let durationSeconds = "durationSeconds"
     static let byteCount = "byteCount"
 
+    private static let metadataDateFormatter = ISO8601DateFormatter()
+
     static func recordingMetadata(for record: RecordingRecord) -> [String: Any] {
-        let formatter = ISO8601DateFormatter()
         return [
             kind: kindRecording,
             id: record.id,
-            createdAt: formatter.string(from: record.createdAt),
+            createdAt: metadataDateFormatter.string(from: record.createdAt),
             durationSeconds: record.durationSeconds,
             byteCount: record.byteCount
         ]
