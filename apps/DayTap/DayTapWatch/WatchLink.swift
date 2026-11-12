@@ -98,7 +98,7 @@ final class WatchLink: NSObject {
             transfer.file.metadata?[TransferKeys.id] as? String
         })
 
-        var submitted = 0
+        var submittedCount = 0
         let now = Date()
         for record in library.snapshot() where record.awaitsPhoneAck {
             if outstanding.contains(record.id) {
@@ -114,10 +114,10 @@ final class WatchLink: NSObject {
                 continue
             }
             enqueue(record)
-            submitted += 1
+            submittedCount += 1
         }
         refreshSummary(reachable: session.isReachable, reason: reason)
-        return RetryResult(submitted: submitted, waiting: waitingCount, failed: failedCount)
+        return RetryResult(submitted: submittedCount, waiting: waitingCount, failed: failedCount)
     }
 
     func enqueue(id: String) {
@@ -204,6 +204,13 @@ final class WatchLink: NSObject {
             let id = url.deletingPathExtension().lastPathComponent
             if known.contains(id) { continue }
             let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
+            // <1KB 只有容器头的空壳(#17/#59):录到一半被杀的残件,入册重传只会穿到手机
+            // 列表变 0 秒哑弹——与 finish 的 1024 下限同口径,直接删。
+            if let size = values?.fileSize, size < 1024 {
+                try? FileManager.default.removeItem(at: url)
+                DayTapLog.link.info("purged shell orphan \(id, privacy: .public) size=\(size, privacy: .public)")
+                continue
+            }
             let record = RecordingRecord(
                 id: id,
                 createdAt: values?.creationDate ?? Date(),
@@ -317,14 +324,14 @@ extension WatchLink: WCSessionDelegate {
         }
         DispatchQueue.main.async {
             self.clearSubmitted(id)
-            // 同一条可能先被对账清账、回执才姗姗来迟——只在索引里还在等回执时才计才删,
+            // 同一条可能先被对账清账、回执才姗姗来迟——只在索引里还在等回执时才删,
             // 否则累计口径会被重复回执灌水(#45)。
             guard self.library.record(id: id)?.awaitsPhoneAck == true else { return }
-            self.countAcknowledged([id])
             // 确认即删(#21 方案A):手机已落盘并回执,原件在手表上不再保留。
-            // 旧版先标 .acknowledged 再删——中间态没有任何观察者,#45 起计数后直接删,
-            // 也让累计口径不会被「标了没删就崩溃」的窗口重复计。
+            // #59 先删后计:计数与删索引是两条持久化,「计了没删」窗口崩溃会重复计,
+            // 反过来最多漏计一条——无害方向。
             self.library.remove(id: id)
+            self.countAcknowledged([id])
             DayTapLog.link.info("phone acked \(id, privacy: .public); purged on watch")
             self.setStatus("iPhone 已保存")
         }
@@ -369,12 +376,14 @@ extension WatchLink: WCSessionDelegate {
             // 清单发出到裁决回来之间,直接回执可能已把这条清账——在索引里还在才算数(#45)。
             guard library.record(id: id)?.awaitsPhoneAck == true else { continue }
             clearSubmitted(id)
-            countAcknowledged([id])
             library.remove(id: id)
+            countAcknowledged([id])
             DayTapLog.link.info("reconcile acked \(id, privacy: .public); purged on watch")
         }
         for id in resend {
             guard let record = library.record(id: id), record.awaitsPhoneAck else { continue }
+            // #59:reachability 路径里 retryPending 刚跑过,同批已在系统队列的不再重复入队。
+            if isSubmitted(record.id) { continue }
             enqueue(record)
         }
         refreshSummary(reachable: WCSession.default.isReachable, reason: "reconcile")

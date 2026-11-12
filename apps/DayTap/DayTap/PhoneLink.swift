@@ -191,11 +191,11 @@ extension PhoneLink: WCSessionDelegate {
             lastError: nil,
             updatedAt: Date()
         )
-        // 传输完整性守门(#48):手表元数据里的 byteCount 是保存时实测的真实大小;
-        // 实收明显偏小=过河被截断(实测 28B 空壳与 470KB/18MB 半截两类)。
-        // 不保存也不回执——之前收到就回执,手表按回执删原件,截断即数据真丢。
+        // 传输完整性守门(#48→#59 收紧):byteCount 是手表对同一文件定稿时实测,完好到达
+        // 必严格相等;原 90% 阈值会放行 90–100% 截断件——m4a 的 moov 在尾部,丢 8% 同样
+        // 不可播,却照样回执→手表删原件→真丢。不等一律不保存不回执,手表自动重试。
         let receivedSize = (try? FileManager.default.attributesOfItem(atPath: file.fileURL.path)[.size] as? Int) ?? 0
-        if bytes >= 1024, receivedSize < bytes * 9 / 10 {
+        if receivedSize != bytes {
             DayTapLog.library.error("truncated arrival \(id, privacy: .public) expected=\(bytes, privacy: .public) got=\(receivedSize, privacy: .public); not acked")
             // 拒收必须可见(#48 修正):publish 的文案只在「未连接」卡里渲染,连接正常时整条吞掉——
             // 用户看到的就是"手机没反应"。改走通知进列表页 banner,带应/实收数字。
@@ -204,14 +204,21 @@ extension PhoneLink: WCSessionDelegate {
             NotificationCenter.default.post(name: .daytapTransferRejected, object: message)
             return
         }
-        // 历史空壳让位(#48 收尾):完好的来件若撞上此前落盘的截断坏副本,importAudio 的
-        // 「目标存在即跳过复制」会保壳拒新、照回执——手表删原件,好数据被空壳吃掉。
-        // 进门先验既有副本:不达标就让位,好件落位后同 id 行原地痊愈(byteCount/转写全刷新)。
+        // <1KB 空壳(#17/#59):finish 的 1024 下限本不该产出这种件(旧版孤儿回收可能造出),
+        // 到达即回执但不落库——手表清掉尾巴,也不给自动重试留死循环。
+        if bytes < 1024 {
+            DayTapLog.library.error("shell arrival \(id, privacy: .public) bytes=\(bytes, privacy: .public); acked & dropped")
+            session.transferUserInfo(TransferKeys.ackMetadata(id: id))
+            return
+        }
+        // 让位(#48 收尾→#59 收紧为不等即让):完好的来件若撞上尺寸对不上的既有副本
+        // (截断坏壳/陈旧残件),importAudio 的「目标存在即跳过复制」会保壳拒新、照回执——
+        // 手表删原件,好数据被空壳吃掉。让位后好件落位,同 id 行原地痊愈。
         let destination = library.fileURL(id: id)
         if let existing = try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int,
-           bytes >= 1024, existing < bytes * 9 / 10 {
+           existing != bytes {
             try? FileManager.default.removeItem(at: destination)
-            DayTapLog.library.info("cleared stale shell \(id, privacy: .public) (\(existing, privacy: .public)B) for good arrival")
+            DayTapLog.library.info("cleared mismatched copy \(id, privacy: .public) (\(existing, privacy: .public)B) for good arrival")
         }
         let saved = library.importAudio(from: file.fileURL, record: record)
         if saved {
@@ -252,9 +259,11 @@ extension PhoneLink: WCSessionDelegate {
             let expected = TransferKeys.doubleValue(item[TransferKeys.byteCount])
             let url = library.fileURL(id: id)
             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Double) ?? 0
+            // #59 收紧:尺寸严格相等才算完好——0.9 阈值会把 90–100% 截断件裁成「已有」并
+            // 回执,手表删原件后手机永远持有不可播残件(moov 在尾部,差 8% 一样坏)。
             let intact = library.record(id: id) != nil
                 && FileManager.default.fileExists(atPath: url.path)
-                && (expected < 1024 || fileSize >= expected * 0.9)
+                && fileSize == expected
             if intact {
                 acked.append(id)
             } else {

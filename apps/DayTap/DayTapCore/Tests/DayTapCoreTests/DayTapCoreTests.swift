@@ -185,3 +185,81 @@ final class DayTapCoreTests: XCTestCase {
         )
     }
 }
+
+extension DayTapCoreTests {
+// MARK: - #59 防线回归
+
+/// 重复到达(回执丢失→手表重传)不得抹掉手机端已转写/改名/摘要/软删状态。
+func testImportAudioDuplicateArrivalPreservesRichFields() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("dup-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let lib = RecordingLibrary(
+        audioDirectory: dir.appendingPathComponent("a", isDirectory: true),
+        indexURL: dir.appendingPathComponent("index.json")
+    )
+
+    // 第一轮:正常入库 + 手机端转写/改名/摘要/软删全部发生
+    let src = dir.appendingPathComponent("src.m4a")
+    try Data(repeating: 0x51, count: 2048).write(to: src)
+    XCTAssertTrue(lib.importAudio(from: src, record: Self.record(id: "dup-1")))
+    var enriched = lib.record(id: "dup-1")!
+    enriched.displayName = "季度会"
+    enriched.transcript = "聊了三件事"
+    enriched.summary = "摘要在此"
+    enriched.autoTitle = "季度会要点"
+    enriched.category = "会议"
+    enriched.transcriptSegments = [TranscriptSegment(text: "聊了三件事", start: 0, duration: 3)]
+    enriched.transcribedAt = Date()
+    enriched.deletedAt = Date()
+    XCTAssertTrue(lib.upsert(enriched))
+
+    // 第二轮:手表重传的裸 record(富字段全 nil)+ 文件已存在跳过复制
+    var raw = Self.record(id: "dup-1")
+    raw.byteCount = 2048
+    XCTAssertTrue(lib.importAudio(from: src, record: raw))
+
+    let after = try XCTUnwrap(lib.record(id: "dup-1"))
+    XCTAssertEqual(after.displayName, "季度会")
+    XCTAssertEqual(after.transcript, "聊了三件事")
+    XCTAssertEqual(after.summary, "摘要在此")
+    XCTAssertEqual(after.autoTitle, "季度会要点")
+    XCTAssertEqual(after.category, "会议")
+    XCTAssertNotNil(after.transcriptSegments)
+    XCTAssertNotNil(after.transcribedAt)
+    XCTAssertNotNil(after.deletedAt, "软删状态(用户意图)必须保留")
+    XCTAssertEqual(after.state, .acknowledged)
+}
+
+/// 主索引损坏(半写)时从 .bak 恢复,不再静默从空表起步把元数据清光。
+func testIndexBackupRecovery() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("bak-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let indexURL = dir.appendingPathComponent("index.json")
+
+    let lib = RecordingLibrary(
+        audioDirectory: dir.appendingPathComponent("a", isDirectory: true),
+        indexURL: indexURL
+    )
+    lib.upsert(Self.record(id: "keep-1"))
+    lib.upsert(Self.record(id: "keep-2"))
+    lib.upsert(Self.record(id: "keep-3"))
+    // 第三次 upsert 把含前两条的完整版轮转进 .bak——恢复语义:最多丢最后一次写入
+
+    // 模拟半写:主索引写坏,.bak 留存
+    try Data("not json at all {{{".utf8).write(to: indexURL)
+
+    let reborn = RecordingLibrary(
+        audioDirectory: dir.appendingPathComponent("a", isDirectory: true),
+        indexURL: indexURL
+    )
+    XCTAssertEqual(
+        reborn.snapshot().map(\.id).sorted(),
+        ["keep-1", "keep-2"],
+        "损坏后应从 .bak 恢复(最多丢最后一次写入),而不是从零开始"
+    )
+}
+}

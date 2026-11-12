@@ -145,10 +145,11 @@ final class WatchModel: ObservableObject {
         transferWaiting = link.waitingCount
         transferFailed = link.failedCount
         transferConfirmed = link.acknowledgedTotal
-        transferError = link.library.snapshot()
+        let snapshot = link.library.snapshot()
+        transferError = snapshot
             .first { $0.state == .failed && $0.lastError != nil }?
             .lastError
-        transferBytes = link.library.snapshot()
+        transferBytes = snapshot
             .filter(\.awaitsPhoneAck)
             .reduce(0) { $0 + $1.byteCount }
     }

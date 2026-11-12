@@ -177,7 +177,7 @@ struct RecordingListView: View {
             DayTapLog.link.info("open url \(url.absoluteString, privacy: .public)")
         }
         // 守门拒收可见化(#48):文件到了但不完整,数字直接亮在列表顶。
-        .onReceive(NotificationCenter.default.publisher(for: .daytapTransferRejected)) { note in
+        .onReceive(NotificationCenter.default.publisher(for: .daytapTransferRejected).receive(on: DispatchQueue.main)) { note in
             banner = note.object as? String ?? "一条录音传输不完整，已拒收等手表重传"
         }
         .onChange(of: scenePhase) { _, phase in

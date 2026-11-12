@@ -33,7 +33,9 @@ final class RecordingLibrary: ObservableObject {
         audioDirectory.appendingPathComponent(TransferKeys.filename(for: id))
     }
 
-    func upsert(_ record: RecordingRecord) {
+    /// 返回 false=索引落盘失败(磁盘满等),调用方据此不回执(#59:手表保留原件而非删)。
+    @discardableResult
+    func upsert(_ record: RecordingRecord) -> Bool {
         mutate { records in
             if let index = records.firstIndex(where: { $0.id == record.id }) {
                 records[index] = record
@@ -54,6 +56,20 @@ final class RecordingLibrary: ObservableObject {
                 try FileManager.default.copyItem(at: source, to: destination)
             }
             var stored = record
+            // 重复到达保富字段(#59):回执丢失→重传的裸 record 不再把手机端已转写/改名/
+            // 摘要/软删状态整条抹掉——索引里非空的派生字段与用户输入永远赢过传输元数据。
+            if let existing = self.record(id: record.id) {
+                stored.displayName = existing.displayName ?? stored.displayName
+                stored.transcript = existing.transcript ?? stored.transcript
+                stored.transcriptSegments = existing.transcriptSegments ?? stored.transcriptSegments
+                if let stamped = existing.transcribedAt { stored.transcribedAt = stamped }
+                stored.summary = existing.summary ?? stored.summary
+                stored.actionItems = existing.actionItems ?? stored.actionItems
+                stored.autoTitle = existing.autoTitle ?? stored.autoTitle
+                stored.category = existing.category ?? stored.category
+                if let deletedAt = existing.deletedAt { stored.deletedAt = deletedAt }
+                if let origin = existing.origin { stored.origin = origin }
+            }
             stored.byteCount = fileSize(at: destination) ?? record.byteCount
             // #44:手表偶发传来 duration=0 但音频真实存在(33KB/0s 案)——按落盘文件实测时长兜底。
             if stored.durationSeconds < 1,
@@ -65,7 +81,10 @@ final class RecordingLibrary: ObservableObject {
             stored.state = .acknowledged
             stored.lastError = nil
             stored.updatedAt = Date()
-            upsert(stored)
+            guard upsert(stored) else {
+                DayTapLog.library.error("import \(record.id, privacy: .public): index write failed, NOT acking")
+                return false
+            }
             DayTapLog.library.info("saved \(stored.id, privacy: .public) bytes=\(stored.byteCount)")
             return true
         } catch {
@@ -149,18 +168,23 @@ final class RecordingLibrary: ObservableObject {
         return values?.fileSize
     }
 
-    private func mutate(_ body: (inout [RecordingRecord]) -> Void) {
+    /// 返回是否成功落盘(#59:importAudio 据此决定回不回执)。
+    @discardableResult
+    private func mutate(_ body: (inout [RecordingRecord]) -> Void) -> Bool {
         lock.lock()
         body(&storage)
         storage.sort { $0.createdAt > $1.createdAt }
         let snapshot = storage
+        var persisted = true
         do {
             try Self.write(snapshot, to: indexURL)
         } catch {
+            persisted = false
             DayTapLog.library.error("write index failed \(error.localizedDescription, privacy: .public)")
         }
         lock.unlock()
         publish(snapshot)
+        return persisted
     }
 
     private func publish(_ snapshot: [RecordingRecord]) {
@@ -168,22 +192,39 @@ final class RecordingLibrary: ObservableObject {
             records = snapshot
         } else {
             DispatchQueue.main.async { [weak self] in
-                self?.records = snapshot
+                // 回锁重读最新值(#59):后台 mutate 的旧快照晚到时,不再把主线程刚发布的新状态拉回去
+                guard let self else { return }
+                self.records = self.snapshot()
             }
         }
     }
 
     private static func read(indexURL: URL) -> [RecordingRecord] {
-        guard let data = try? Data(contentsOf: indexURL) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        do {
-            let decoded = try decoder.decode([RecordingRecord].self, from: data)
-            return decoded.sorted { $0.createdAt > $1.createdAt }
-        } catch {
-            DayTapLog.library.error("read index failed \(error.localizedDescription, privacy: .public)")
-            return []
+        func decode(_ url: URL) -> [RecordingRecord]? {
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try? decoder.decode([RecordingRecord].self, from: data)
         }
+
+        if let records = decode(indexURL) {
+            return records.sorted { $0.createdAt > $1.createdAt }
+        }
+        // 主索引坏(半写/损坏):先吃 .bak 备份,不再静默从空表起步——否则下一次 mutate
+        // 会把只含新内容的快照覆盖写回,旧元数据(转写/摘要/名字)无备份蒸发(#59)。
+        let bakURL = indexURL.appendingPathExtension("bak")
+        if let records = decode(bakURL) {
+            DayTapLog.library.error("index unreadable, recovered \(records.count) records from .bak")
+            return records.sorted { $0.createdAt > $1.createdAt }
+        }
+        if FileManager.default.fileExists(atPath: indexURL.path) {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let evidence = indexURL.deletingLastPathComponent()
+                .appendingPathComponent("index.corrupt-\(stamp).json")
+            try? FileManager.default.moveItem(at: indexURL, to: evidence)
+            DayTapLog.library.error("index unreadable and no .bak; corrupt copy preserved as \(evidence.lastPathComponent)")
+        }
+        return []
     }
 
     private static func write(_ records: [RecordingRecord], to indexURL: URL) throws {
@@ -191,6 +232,12 @@ final class RecordingLibrary: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(records)
+        // .bak 轮转(#59):写新之前把当前版留底,读侧解码失败时从备份恢复。
+        let bakURL = indexURL.appendingPathExtension("bak")
+        if FileManager.default.fileExists(atPath: indexURL.path) {
+            try? FileManager.default.removeItem(at: bakURL)
+            try? FileManager.default.copyItem(at: indexURL, to: bakURL)
+        }
         try data.write(to: indexURL, options: [.atomic])
     }
 }
