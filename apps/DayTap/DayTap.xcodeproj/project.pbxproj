@@ -7,19 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B11000000000000000000001 /* DayTapLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* DayTapLog.swift */; };
-		B11000000000000000000002 /* RecordingRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* RecordingRecord.swift */; };
-		B11000000000000000000003 /* RecordingLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* RecordingLibrary.swift */; };
-		B11000000000000000000004 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* Formatters.swift */; };
 		B1100000000000000000000A /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000003 /* WatchConnectivity.framework */; };
-		B21000000000000000000001 /* DayTapLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* DayTapLog.swift */; };
-		B21000000000000000000002 /* RecordingRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* RecordingRecord.swift */; };
-		B21000000000000000000003 /* RecordingLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* RecordingLibrary.swift */; };
-		B21000000000000000000004 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* Formatters.swift */; };
 		B2100000000000000000000B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000004 /* AVFoundation.framework */; };
 		B2100000000000000000000C /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000003 /* WatchConnectivity.framework */; };
 		B31000000000000000000001 /* DayTap Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000002 /* DayTap Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B51000000000000000000002 /* DayTapWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000005 /* DayTapWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B1100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
+		B2100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,47 +64,14 @@
 		EE0000000000000000000003 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
 		EE0000000000000000000004 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		EE0000000000000000000005 /* DayTapWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DayTapWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		F10000000000000000000001 /* DayTapLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTapLog.swift; sourceTree = "<group>"; };
-		F10000000000000000000002 /* RecordingRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingRecord.swift; sourceTree = "<group>"; };
-		F10000000000000000000003 /* RecordingLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingLibrary.swift; sourceTree = "<group>"; };
-		F10000000000000000000004 /* Formatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatters.swift; sourceTree = "<group>"; };
+		F10000000000000000000005 /* AudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AC1000000000000000000001 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = BB0000000000000000000001 /* DayTap */;
-		};
-		AC1000000000000000000002 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = BB0000000000000000000002 /* DayTap Watch App */;
-		};
-		AC1000000000000000000003 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				AudioCapture.swift,
-			);
-			target = BB0000000000000000000001 /* DayTap */;
-		};
-		AC1000000000000000000004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = BB0000000000000000000003 /* DayTapWidgetExtension */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA0000000000000000000005 /* DayTap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC1000000000000000000001 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = DayTap; sourceTree = "<group>"; };
-		AA0000000000000000000006 /* DayTapWatch */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC1000000000000000000003 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, AC1000000000000000000002 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = DayTapWatch; sourceTree = "<group>"; };
-		AA0000000000000000000008 /* DayTapWidget */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC1000000000000000000004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = DayTapWidget; sourceTree = "<group>"; };
+		AA0000000000000000000005 /* DayTap */ = {isa = PBXFileSystemSynchronizedRootGroup;  explicitFileTypes = {}; explicitFolders = (); path = DayTap; sourceTree = "<group>"; };
+		AA0000000000000000000006 /* DayTapWatch */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DayTapWatch; sourceTree = "<group>"; };
+		AA0000000000000000000008 /* DayTapWidget */ = {isa = PBXFileSystemSynchronizedRootGroup;  explicitFileTypes = {}; explicitFolders = (); path = DayTapWidget; sourceTree = "<group>"; };
+		AA0000000000000000000009 /* DayTapCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = DayTapCore/Sources/DayTapCore; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -166,10 +127,7 @@
 		AA0000000000000000000004 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
-				F10000000000000000000001 /* DayTapLog.swift */,
-				F10000000000000000000002 /* RecordingRecord.swift */,
-				F10000000000000000000003 /* RecordingLibrary.swift */,
-				F10000000000000000000004 /* Formatters.swift */,
+				F10000000000000000000005 /* AudioCapture.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -202,6 +160,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000005 /* DayTap */,
+				AA0000000000000000000009 /* DayTapCore */,
 			);
 			name = DayTap;
 			productName = DayTap;
@@ -224,6 +183,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000006 /* DayTapWatch */,
+				AA0000000000000000000009 /* DayTapCore */,
 			);
 			name = "DayTap Watch App";
 			productName = "DayTap Watch App";
@@ -321,10 +281,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B11000000000000000000001 /* DayTapLog.swift in Sources */,
-				B11000000000000000000002 /* RecordingRecord.swift in Sources */,
-				B11000000000000000000003 /* RecordingLibrary.swift in Sources */,
-				B11000000000000000000004 /* Formatters.swift in Sources */,
+				B1100000000000000000000D /* AudioCapture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -332,10 +289,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B21000000000000000000001 /* DayTapLog.swift in Sources */,
-				B21000000000000000000002 /* RecordingRecord.swift in Sources */,
-				B21000000000000000000003 /* RecordingLibrary.swift in Sources */,
-				B21000000000000000000004 /* Formatters.swift in Sources */,
+				B2100000000000000000000D /* AudioCapture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -417,7 +371,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTap/Info.plist;
+				INFOPLIST_FILE = Config/Phone-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -445,7 +399,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTap/Info.plist;
+				INFOPLIST_FILE = Config/Phone-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -473,7 +427,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTapWatch/Info.plist;
+				INFOPLIST_FILE = Config/Watch-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -502,7 +456,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTapWatch/Info.plist;
+				INFOPLIST_FILE = Config/Watch-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -528,7 +482,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTapWidget/Info.plist;
+				INFOPLIST_FILE = Config/Widget-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -555,7 +509,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DayTapWidget/Info.plist;
+				INFOPLIST_FILE = Config/Widget-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -615,6 +569,7 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
 	};
 	rootObject = AA0000000000000000000001 /* Project object */;
 }
