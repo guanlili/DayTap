@@ -223,6 +223,15 @@ final class TranscriptionCenter: ObservableObject {
         var actions: [ActionItem]?
     }
 
+    /// 「今天」上下文(#61 修正):转写正文里通常没有日期,模型只能瞎猜基准日——
+    /// 「周五」换算错全因于此。两个引擎的输入第一行都注入今天日期+星期。
+    static var todayContext: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日 EEEE"
+        return "今天是\(formatter.string(from: Date()))。"
+    }
+
     /// 三级瀑布(#39):本机 Foundation Models(可用必优先)→ 云端(已配置)→ 留空+状态卡说明。
     /// 国行 iPhone 无 Apple 智能,云端是主力用户实际吃到摘要卡的路径。
     private func digest(transcript: String) async -> DigestResult? {
@@ -256,7 +265,7 @@ final class TranscriptionCenter: ObservableObject {
         )
         do {
             let response = try await session.respond(
-                to: "转写全文如下:\n\(String(transcript.prefix(4000)))",
+                to: Self.todayContext + "转写全文如下:\n\(String(transcript.prefix(4000)))",
                 generating: RecordingDigest.self
             )
             let raw = response.content
@@ -324,8 +333,8 @@ final class TranscriptionCenter: ObservableObject {
         }
         do {
             let reply = try await client.chat(
-                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
-                user: String(transcript.prefix(4000))
+                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
+                user: Self.todayContext + "\n" + String(transcript.prefix(4000))
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
             // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
@@ -444,7 +453,7 @@ struct RecordingDigest {
     var summary: String
     @Guide(description: "录音里提到的待办事项,每条一句话;没有待办就给空列表")
     var actionItems: [String]
-    @Guide(description: "与 actionItems 一一对应的截止时间数组,格式 yyyy-MM-dd HH:mm;把「周五下午」「下月1号」这类表述换算成具体日期,今天的日期可从上下文推断;该条没有明确时间就给空字符串")
+    @Guide(description: "与 actionItems 一一对应的截止时间数组,格式 yyyy-MM-dd HH:mm;把「周五下午」「下月1号」这类相对表述换算成具体日期,今天的日期在输入第一行给出,以它为基准;该条没有明确时间就给空字符串")
     var actionDeadlines: [String]
 }
 
