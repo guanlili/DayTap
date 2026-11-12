@@ -256,7 +256,7 @@ struct RecordingListView: View {
             ExportSheet(records: visibleRecords, category: categoryFilter)
         }
         .sheet(isPresented: $showReview) {
-            ReviewSheet(records: activeRecords)
+            ReviewSheet(records: activeRecords, library: library)
         }
     }
 

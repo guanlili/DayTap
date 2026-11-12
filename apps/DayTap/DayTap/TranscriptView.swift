@@ -5,10 +5,24 @@ import SwiftUI
 /// 底部内嵌迷你播放条,拖它高亮跟着走(双向锚定)。无分段的老转写退回纯文本。
 /// 顶栏保留 重新转写/分享文字,底栏 复制全文 与播放条并存。
 struct TranscriptView: View {
+    /// 待办行操作反馈(添加到提醒事项/日历/复制的就地一行)。
+    @State private var actionFeedback = ""
+
     let recordID: String
     @ObservedObject var library: RecordingLibrary
     @ObservedObject var transcriber: TranscriptionCenter
     @ObservedObject var player: PlaybackCenter
+
+    /// 完成态落库(#61):手动操作永远赢——写回索引,下次 AI 重识别也不会覆盖非空字段。
+    private func toggleDone(_ updated: ActionItem) {
+        guard var fresh = library.record(id: recordID),
+              var items = fresh.actionItems,
+              let index = items.firstIndex(where: { $0.id == updated.id })
+        else { return }
+        items[index] = updated
+        fresh.actionItems = items
+        library.upsert(fresh)
+    }
 
     private var record: RecordingRecord? {
         library.record(id: recordID)
@@ -104,14 +118,18 @@ struct TranscriptView: View {
                 }
                 if let actions = record?.actionItems, !actions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(actions, id: \.self) { item in
-                            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                Image(systemName: "circle")
-                                    .font(.caption2)
-                                    .foregroundStyle(Color.accentColor)
-                                Text(item)
-                                    .font(.subheadline)
-                            }
+                        ForEach(actions) { item in
+                            ActionItemRow(
+                                recordID: recordID,
+                                item: .constant(item),
+                                onToggleDone: { toggleDone($0) },
+                                feedback: $actionFeedback
+                            )
+                        }
+                        if !actionFeedback.isEmpty {
+                            Text(actionFeedback)
+                                .font(.caption2)
+                                .foregroundStyle(Color.secondary)
                         }
                     }
                 }
@@ -137,7 +155,13 @@ struct TranscriptView: View {
             parts.append("【摘要】\(summary)")
         }
         if let actions = record.actionItems, !actions.isEmpty {
-            parts.append("【待办】\n" + actions.map { "· \($0)" }.joined(separator: "\n"))
+            parts.append("【待办】\n" + actions.map { item in
+                var line = "· \(item.text)"
+                if let due = item.dueAt {
+                    line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+                }
+                return line
+            }.joined(separator: "\n"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }

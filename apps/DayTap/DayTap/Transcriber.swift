@@ -220,7 +220,7 @@ final class TranscriptionCenter: ObservableObject {
         var category: String?
         var title: String?
         var summary: String?
-        var actions: [String]?
+        var actions: [ActionItem]?
     }
 
     /// 三级瀑布(#39):本机 Foundation Models(可用必优先)→ 云端(已配置)→ 留空+状态卡说明。
@@ -263,9 +263,17 @@ final class TranscriptionCenter: ObservableObject {
             let category = RecordingCategory.presets.first { raw.category.contains($0) }
             let title = raw.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let summary = raw.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            let actions = raw.actionItems
+            let texts = raw.actionItems
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
+            // #61:截止时间与待办 zip 对齐(短了补 nil),AI 没给或格式不对就是无时间。
+            let deadlines = raw.actionDeadlines
+            let actions = texts.enumerated().map { index, text in
+                ActionItem(
+                    text: text,
+                    dueAt: index < deadlines.count ? ActionItem.parseDue(deadlines[index]) : nil
+                )
+            }
             if category == nil {
                 DayTapLog.transcribe.info("digest unmatched category \(raw.category.prefix(10), privacy: .public)")
             }
@@ -293,11 +301,30 @@ final class TranscriptionCenter: ObservableObject {
             var category: String?
             var title: String?
             var summary: String?
-            var actionItems: [String]?
+            // #61:actionItems 兼容两种形态——新 [{text,due}] 与旧裸字符串数组。
+            var actionItems: [CloudAction]?
+        }
+
+        struct CloudAction: Decodable {
+            var text: String?
+            var due: String?
+
+            init(from decoder: Decoder) throws {
+                if let plain = try? decoder.singleValueContainer().decode(String.self) {
+                    text = plain
+                    due = nil
+                    return
+                }
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                text = try container.decodeIfPresent(String.self, forKey: .text)
+                due = try container.decodeIfPresent(String.self, forKey: .due)
+            }
+
+            enum CodingKeys: String, CodingKey { case text, due }
         }
         do {
             let reply = try await client.chat(
-                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(字符串数组,全文提到的待办事项,每条一句,没有则空数组)。",
+                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
                 user: String(transcript.prefix(4000))
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -310,8 +337,12 @@ final class TranscriptionCenter: ObservableObject {
             let payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
             let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
             let actions = (payload.actionItems ?? [])
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+                .compactMap { raw -> ActionItem? in
+                    guard let text = raw.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !text.isEmpty
+                    else { return nil }
+                    return ActionItem(text: text, dueAt: raw.due.flatMap(ActionItem.parseDue))
+                }
             return DigestResult(
                 category: category,
                 title: payload.title.flatMap { $0.isEmpty ? nil : String($0.prefix(12)) },
@@ -413,6 +444,8 @@ struct RecordingDigest {
     var summary: String
     @Guide(description: "录音里提到的待办事项,每条一句话;没有待办就给空列表")
     var actionItems: [String]
+    @Guide(description: "与 actionItems 一一对应的截止时间数组,格式 yyyy-MM-dd HH:mm;把「周五下午」「下月1号」这类表述换算成具体日期,今天的日期可从上下文推断;该条没有明确时间就给空字符串")
+    var actionDeadlines: [String]
 }
 
 enum TranscriptionError: LocalizedError {

@@ -5,6 +5,7 @@ import SwiftUI
 /// 滚动「最近 7 天」而非卡历周,避免周一重置割裂周末;仅统计未删除条目。
 struct ReviewSheet: View {
     let records: [RecordingRecord]
+    var library: RecordingLibrary? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var weekRecords: [RecordingRecord] {
@@ -33,13 +34,28 @@ struct ReviewSheet: View {
     }
 
     /// 待办汇总(最近 7 天):按录音归组,带来源标题。
-    private var todoGroups: [(id: String, title: String, items: [String])] {
+    /// 勾选落库(#61):本周回顾里也能勾,与摘要卡同一条数据。
+    private func toggleDone(_ recordID: String, _ updated: ActionItem) {
+        guard let library,
+              var fresh = library.record(id: recordID),
+              var items = fresh.actionItems,
+              let index = items.firstIndex(where: { $0.id == updated.id })
+        else { return }
+        items[index] = updated
+        fresh.actionItems = items
+        library.upsert(fresh)
+    }
+
+    private var todoGroups: [(id: String, title: String, recordID: String, items: [ActionItem])] {
         weekRecords.compactMap { record in
             guard let items = record.actionItems, !items.isEmpty else { return nil }
             // id 用录音 id:两条同名(都叫「晨会」)时 ForEach(id: \.title) 会撞(#59)
-            return (id: record.id, title: ReviewSheet.rowTitle(record), items: items)
+            return (id: record.id, title: ReviewSheet.rowTitle(record), recordID: record.id, items: items)
         }
     }
+
+    /// 待办行反馈一行(#61)。
+    @State private var reviewFeedback = ""
 
     var body: some View {
         NavigationStack {
@@ -84,14 +100,13 @@ struct ReviewSheet: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(group.title)
                                         .font(.subheadline.weight(.semibold))
-                                    ForEach(group.items, id: \.self) { item in
-                                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                            Image(systemName: "circle")
-                                                .font(.caption2)
-                                                .foregroundStyle(Color.accentColor)
-                                            Text(item)
-                                                .font(.subheadline)
-                                        }
+                                    ForEach(group.items) { item in
+                                        ActionItemRow(
+                                            recordID: group.recordID,
+                                            item: .constant(item),
+                                            onToggleDone: { updated in toggleDone(group.recordID, updated) },
+                                            feedback: $reviewFeedback
+                                        )
                                     }
                                 }
                                 .padding(.vertical, 2)
@@ -124,7 +139,14 @@ struct ReviewSheet: View {
     /// 「复制全部待办」的文本:按来源分组,与摘要卡同符号体系。
     private var todoText: String {
         "【待办 · 最近 7 天】\n" + todoGroups.map { group in
-            "■ \(group.title)\n" + group.items.map { "· \($0)" }.joined(separator: "\n")
+            "■ \(group.title)\n" + group.items.map { item in
+                var line = "· \(item.text)"
+                if let due = item.dueAt {
+                    line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+                }
+                if item.isDone { line += " ✓" }
+                return line
+            }.joined(separator: "\n")
         }.joined(separator: "\n\n")
     }
 

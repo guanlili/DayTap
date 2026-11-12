@@ -2,11 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	    不设置 UIBackgroundModes。
-	    WatchConnectivity 传文件时，系统会按需唤醒本 App 并调用 WCSessionDelegate，
-	    不需要音频或蓝牙后台模式。本 App 在 iPhone 上不录音。
-	-->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
@@ -23,8 +18,6 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -36,6 +29,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -44,8 +39,12 @@
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>$(IPHONEOS_DEPLOYMENT_TARGET)</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>把带截止时间的待办添加到日历时使用，只在你确认后写入。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>DayTap 用 iPhone 麦克风直接录音。音频只保存在这台 iPhone 上，可试听、分享或转文字。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>把录音里识别出的待办添加到「提醒事项」时使用，只在你确认后写入。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>DayTap 用系统自带的语音识别把录音转成文字。识别在本机完成，音频不上传。在录音列表点「转文字」时使用。</string>
 	<key>UIApplicationSceneManifest</key>

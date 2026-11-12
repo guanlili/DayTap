@@ -15,6 +15,51 @@ enum TransferState: String, Codable {
     case failed
 }
 
+/// 待办 2.0(#61):AI 从转写全文识别的行动项,带完成态与可选截止时间。
+/// 自定义解码兼容旧索引——旧版 actionItems 是纯字符串数组,裸串解码为「未完成、无时间」。
+struct ActionItem: Codable, Equatable, Identifiable {
+    var text: String
+    var isDone: Bool = false
+    /// AI 识别的截止时间(「周五下午」类表述归一化而来);没有则 nil。
+    var dueAt: Date? = nil
+
+    var id: String { text }
+
+    init(text: String, isDone: Bool = false, dueAt: Date? = nil) {
+        self.text = text
+        self.isDone = isDone
+        self.dueAt = dueAt
+    }
+
+    init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer().decode(String.self) {
+            text = legacy
+            isDone = false
+            dueAt = nil
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        isDone = try container.decodeIfPresent(Bool.self, forKey: .isDone) ?? false
+        dueAt = try container.decodeIfPresent(Date.self, forKey: .dueAt)
+    }
+
+    /// 解析 AI 输出的截止时间(#61):yyyy-MM-dd HH:mm 优先,退 yyyy-MM-dd;
+    /// 空/格式不对一律 nil——识别失败不添乱。
+    static func parseDue(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        let minuteFormatter = DateFormatter()
+        minuteFormatter.locale = Locale(identifier: "en_US_POSIX")
+        minuteFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        if let date = minuteFormatter.date(from: trimmed) { return date }
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        return dayFormatter.date(from: trimmed)
+    }
+}
+
 /// 转写的时间戳分段(#29):一段文字 + 它在音频里的位置。
 /// 搜索仍走 transcript 纯文本(快);分段只用于「命中跳播/点句跳播」的定位与渲染。
 struct TranscriptSegment: Codable, Equatable {
@@ -58,7 +103,7 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 可选字段,旧 index 解码 nil 兼容;不进手表协议。
     var transcribedAt: Date? = nil
     /// 摘要卡待办清单(#35):每条一行短句。派生内容,同 summary 口径。
-    var actionItems: [String]? = nil
+    var actionItems: [ActionItem]? = nil
     /// 自动内容短标题(#36):≤12 字,转写完由摘要链路顺手生成;展示优先级 手动名>autoTitle>时刻。
     /// 可选字段,兼容同上;不进手表协议(手表自己的索引永远没有它)。
     var autoTitle: String? = nil

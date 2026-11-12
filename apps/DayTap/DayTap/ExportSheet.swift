@@ -116,7 +116,12 @@ private enum ExportBuilder {
                 if let actions = record.actionItems, !actions.isEmpty {
                     lines.append(markdown ? "**待办**" : "待办：")
                     for item in actions {
-                        lines.append(markdown ? "- \(item)" : "· \(item)")
+                        var line = item.text
+                        if let due = item.dueAt {
+                            line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+                        }
+                        if item.isDone { line += " ✓" }
+                        lines.append(markdown ? "- \(line)" : "· \(line)")
                     }
                 }
                 if content == .full, let transcript = record.transcript {

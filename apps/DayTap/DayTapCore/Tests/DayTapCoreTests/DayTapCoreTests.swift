@@ -263,3 +263,44 @@ func testIndexBackupRecovery() throws {
     )
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #61 待办 2.0
+
+/// 旧索引的 actionItems 是纯字符串数组——裸串必须解码为「未完成、无截止」。
+func testActionItemLegacyStringDecodes() throws {
+    let json = #"["给张总发报告","订周五的会议室"]"#
+    let items = try JSONDecoder().decode([ActionItem].self, from: Data(json.utf8))
+    XCTAssertEqual(items.count, 2)
+    XCTAssertEqual(items[0].text, "给张总发报告")
+    XCTAssertEqual(items[0].isDone, false)
+    XCTAssertNil(items[0].dueAt)
+}
+
+func testActionItemRoundTripKeepsState() throws {
+    let item = ActionItem(text: "回拨王工", isDone: true, dueAt: Date(timeIntervalSince1970: 1_800_000_000))
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let data = try encoder.encode([item])
+    let back = try decoder.decode([ActionItem].self, from: data)
+    XCTAssertEqual(back, [item])
+}
+
+func testParseDueFormats() {
+    XCTAssertNotNil(ActionItem.parseDue("2026-11-14 15:30"))
+    XCTAssertNotNil(ActionItem.parseDue(" 2026-11-14 "))
+    XCTAssertNotNil(ActionItem.parseDue("2026-11-14"))
+    XCTAssertNil(ActionItem.parseDue(""))
+    XCTAssertNil(ActionItem.parseDue("周五下午"))   // AI 必须换算成具体日期,裸自然语言不吃
+    XCTAssertNil(ActionItem.parseDue("not a date"))
+}
+
+/// 含截止时间的新格式与裸串混排也各自归位。
+func testActionItemMixedArrayDecodes() throws {
+    let json = #"[{"text":"发货","due":null,"isDone":false},"旧样式"]"#
+    let items = try JSONDecoder().decode([ActionItem].self, from: Data(json.utf8))
+    XCTAssertEqual(items.map(\.text), ["发货", "旧样式"])
+}
+}
