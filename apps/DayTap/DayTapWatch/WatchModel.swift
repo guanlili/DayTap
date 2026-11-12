@@ -32,6 +32,8 @@ final class WatchModel: ObservableObject {
     @Published private(set) var transferBytes = 0
     /// 最近一条失败的短原因(有失败才非 nil),角标下小字。
     @Published private(set) var transferError: String?
+    /// 累计已确认(#45 sheet 第三计数):确认即删让索引留不下,读 WatchLink 的持久累计。
+    @Published private(set) var transferConfirmed = 0
     @Published private(set) var permissionDenied = false
 
     var isRecording: Bool { phase == .recording }
@@ -88,8 +90,17 @@ final class WatchModel: ObservableObject {
     }
 
     /// 回到前台:补传没送完的文件;录音状态与采集层对不上时收尾。
+    /// #46:顺带重查麦克风权限——用户可能刚在设置里改过授权,回来按钮就该置灰/恢复。
     func onActive() {
         link.retryPending(reason: "foreground")
+        switch capture.permissionState() {
+        case .denied:
+            permissionDenied = true
+        case .granted, .undetermined:
+            if permissionDenied { permissionDenied = false }
+        @unknown default:
+            break
+        }
         if phase == .recording, !capture.isRecording {
             finish(reason: "录音被系统停下,已保存并排队")
         }
@@ -137,6 +148,7 @@ final class WatchModel: ObservableObject {
         linkStatus = link.statusText
         transferWaiting = link.waitingCount
         transferFailed = link.failedCount
+        transferConfirmed = link.acknowledgedTotal
         transferError = link.library.snapshot()
             .first { $0.state == .failed && $0.lastError != nil }?
             .lastError

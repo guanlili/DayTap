@@ -27,6 +27,15 @@ final class WatchLink: NSObject {
     private(set) var waitingCount = 0
     private(set) var failedCount = 0
 
+    /// 累计已被 iPhone 确认的条数(#45 sheet 第三计数)。确认即删(#21)让已确认记录
+    /// 出索引,sheet 想显示「已确认」只能单独累计;UserDefaults 持久,回执/对账/清账
+    /// 三条路径都从 countAcknowledged 过账,每条只会被计一次。
+    private(set) var acknowledgedTotal: Int {
+        didSet { UserDefaults.standard.set(acknowledgedTotal, forKey: Self.ackTotalKey) }
+    }
+
+    private static let ackTotalKey = "daytap.watch.acknowledgedTotal"
+
     var onChange: (() -> Void)?
 
     /// 本进程里已经交给 `transferFile`、还没收到结束回调的 id。避免同一次启动重复入队。
@@ -37,7 +46,13 @@ final class WatchLink: NSObject {
         let audio = DayTapFolders.documents.appendingPathComponent("Recordings", isDirectory: true)
         let index = DayTapFolders.appSupport.appendingPathComponent("index.json")
         library = RecordingLibrary(audioDirectory: audio, indexURL: index)
+        acknowledgedTotal = UserDefaults.standard.integer(forKey: Self.ackTotalKey)
         super.init()
+    }
+
+    private func countAcknowledged(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        acknowledgedTotal += ids.count
     }
 
     func activate() {
@@ -169,6 +184,9 @@ final class WatchLink: NSObject {
             return false
         }
         guard !settled.isEmpty else { return }
+        // #45:这里清掉的 acknowledged 是旧版本留下的中间态(现版本回执即计即删),
+        // 补计一次,存量手表的「已确认」从真实历史起步。
+        countAcknowledged(settled.filter { $0.state == .acknowledged }.map(\.id))
         for record in settled {
             library.remove(id: record.id)
         }
@@ -299,8 +317,13 @@ extension WatchLink: WCSessionDelegate {
         }
         DispatchQueue.main.async {
             self.clearSubmitted(id)
-            self.library.update(id: id, state: .acknowledged, error: nil)
+            // 同一条可能先被对账清账、回执才姗姗来迟——只在索引里还在等回执时才计才删,
+            // 否则累计口径会被重复回执灌水(#45)。
+            guard self.library.record(id: id)?.awaitsPhoneAck == true else { return }
+            self.countAcknowledged([id])
             // 确认即删(#21 方案A):手机已落盘并回执,原件在手表上不再保留。
+            // 旧版先标 .acknowledged 再删——中间态没有任何观察者,#45 起计数后直接删,
+            // 也让累计口径不会被「标了没删就崩溃」的窗口重复计。
             self.library.remove(id: id)
             DayTapLog.link.info("phone acked \(id, privacy: .public); purged on watch")
             self.setStatus("iPhone 已保存")
@@ -343,7 +366,10 @@ extension WatchLink: WCSessionDelegate {
         let acked = reply[TransferKeys.acked] as? [String] ?? []
         let resend = reply[TransferKeys.resend] as? [String] ?? []
         for id in acked {
+            // 清单发出到裁决回来之间,直接回执可能已把这条清账——在索引里还在才算数(#45)。
+            guard library.record(id: id)?.awaitsPhoneAck == true else { continue }
             clearSubmitted(id)
+            countAcknowledged([id])
             library.remove(id: id)
             DayTapLog.link.info("reconcile acked \(id, privacy: .public); purged on watch")
         }

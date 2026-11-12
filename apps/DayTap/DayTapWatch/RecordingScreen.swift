@@ -1,45 +1,59 @@
 import SwiftUI
+import WatchKit
 
-/// 手表录音页(#5→#24 极简化):一块红按钮,出问题才说话。
+/// 手表主屏(#44 重排):一枚 68pt 红钮绝对居中,不与任何元素纵向堆叠。
+/// 传输状态收敛成左上角标(#46:失败=橙三角,待传=橙点+↑),报告与「再传一次/丢弃待传」
+/// 全部移入传输 sheet(#45)——点角标或长按主按钮 0.6s 打开,主屏不再说话。
 /// 启停:红按钮 / 握拳快捷指令 / 敲桌两下(#11);录音中按表冠回表盘继续录(audio 后台模式)。
-/// 时间不再自绘——右上角系统状态栏已有;触发方式的说明收进手机端「使用指南」(#24 甲方定调)。
+/// 麦克风被拒(#46):按钮 35% 不透明+斜线,点按只给失败触觉,底部两行出路,不弹 alert。
 struct RecordingScreen: View {
     @ObservedObject var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var confirmDiscard = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showTransferSheet = false
+    @State private var ringPulse = false
+    @State private var savedFlash = false
+
+    /// #46 角标专用橙(#FF9500),失败与待传同色——不换位置、不加句子。
+    private let badgeOrange = Color(red: 255 / 255, green: 149 / 255, blue: 0 / 255)
 
     var body: some View {
-        VStack(spacing: 8) {
-            Spacer(minLength: 10)
-
+        ZStack {
+            recordButton
             if model.phase == .recording {
-                HStack(spacing: 6) {
-                    statusDot
+                VStack {
+                    // 计时挂顶部、不参与堆叠——按钮在闲/录两态的位置逐像素一致(#44)。
                     Text(DayTapFormat.clock(model.elapsed))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .padding(.top, 18)
+                    Spacer(minLength: 0)
                 }
-                levelBar
             } else if model.permissionDenied {
-                Text("请在手表设置里允许 DayTap 使用麦克风")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            } else {
-                idleCluster
+                VStack {
+                    Spacer(minLength: 0)
+                    Text("麦克风未授权\n在设置里允许后可用")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 14)
+                }
+            } else if savedFlash {
+                // #44 决策点3:停录「已保存」0.35s 一闪——主屏唯一的瞬态字,常规保存的唯一回执;
+                // 被打断这类异常不在这说,完整状态在传输 sheet 里。
+                VStack {
+                    Spacer(minLength: 0)
+                    Text("已保存")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 14)
+                }
             }
-
-            Spacer(minLength: 8)
-
-            recordButton
         }
-        .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .alert("丢弃待传录音?", isPresented: $confirmDiscard) {
-            Button("丢弃", role: .destructive) { model.discardPending() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("\(model.transferWaiting) 条不会传给 iPhone，手表上直接删除。")
+        .overlay(alignment: .topLeading) { transferBadge }
+        .sheet(isPresented: $showTransferSheet) {
+            TransferSheet(model: model)
         }
         .onAppear {
             model.onAppear()
@@ -59,116 +73,109 @@ struct RecordingScreen: View {
                 break
             }
         }
-        .onChange(of: model.phase) { _, phase in
+        .onChange(of: model.phase) { old, phase in
             // 录音中不听敲桌(开始即目的达成);停录回闲时重新武装(#11)。
             model.setKnockListening(phase == .idle)
+            ringPulse = false
+            if old == .recording, phase == .idle, model.status.isEmpty {
+                savedFlash = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { savedFlash = false }
+            }
         }
     }
 
-    /// 闲时聚落(#24 出问题才说话):瞬态结果最多一行;有待传/失败才出角标、
-    /// 状态句与「再传一次」;有待传才出「丢弃待传」。全清时整块消失,只剩红按钮。
-    @ViewBuilder
-    private var idleCluster: some View {
-        if !model.status.isEmpty {
-            Text(model.status)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-        }
-        transferBadge
-        if model.transferWaiting > 0 || model.transferFailed > 0 {
-            if !model.linkStatus.isEmpty {
-                Text(model.linkStatus)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-            }
-            Button("再传一次", action: model.retry)
-                .buttonStyle(.bordered)
-                .font(.caption2)
-                .accessibilityIdentifier("daytap.record.retry")
-        }
-        if model.transferWaiting > 0 {
-            Button {
-                confirmDiscard = true
-            } label: {
-                Label("丢弃待传 (\(model.transferWaiting))", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-            .font(.caption2)
-            .accessibilityIdentifier("daytap.record.discard")
-        }
-    }
-
-    /// 传输角标(#4/#22):待确认(条数+占用)/失败一眼可读;有失败时补一行短原因。
-    @ViewBuilder
-    private var transferBadge: some View {
-        if model.transferFailed > 0 || model.transferWaiting > 0 {
-            VStack(spacing: 2) {
-                HStack(spacing: 8) {
-                    if model.transferWaiting > 0 {
-                        Label(
-                            "\(model.transferWaiting) 条 · \(DayTapFormat.bytes(model.transferBytes))",
-                            systemImage: "arrow.uturn.up"
-                        )
-                    }
-                    if model.transferFailed > 0 {
-                        Label("\(model.transferFailed)", systemImage: "exclamationmark.triangle")
-                    }
-                }
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(model.transferFailed > 0 ? Color.orange : Color.secondary)
-                if model.transferFailed > 0, let error = model.transferError {
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .accessibilityIdentifier("daytap.transfer.badge")
-        }
-    }
-
-    /// 显式录音大按钮(#23):像语音备忘录那样一眼可见、可按。
-    /// 闲时=红色实心麦克风开录;录音中=白色方块停止。
+    /// 主操作(#44):68pt 绝对居中;闲=红 mic 开录,录=stop 停止。
+    /// 短按启停;长按 0.6s 打开传输 sheet(#45 隐藏入口,不占屏)。
+    /// 被拒=35% 不透明+斜线,点按只给失败触觉,不进录音流程(#46)。
     private var recordButton: some View {
-        Button {
+        Image(
+            systemName: model.permissionDenied
+                ? "mic.slash.fill" : (model.phase == .recording ? "stop.fill" : "mic.fill")
+        )
+        .font(.system(size: 28, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 68, height: 68)
+        .background(Circle().fill(Color.red))
+        .overlay { breathingRing }
+        .opacity(model.permissionDenied ? 0.35 : 1)
+        .onTapGesture {
+            guard !model.permissionDenied else {
+                WKInterfaceDevice.current().play(.failure)
+                return
+            }
             model.toggle()
-        } label: {
-            Image(systemName: model.phase == .recording ? "stop.fill" : "mic.fill")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(Circle().fill(Color.red))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(model.phase == .recording ? "停止并保存" : "开始录音")
+        .onLongPressGesture(minimumDuration: 0.6) {
+            showTransferSheet = true
+        }
+        .accessibilityLabel(
+            model.permissionDenied
+                ? "麦克风未授权" : (model.phase == .recording ? "停止并保存" : "开始录音")
+        )
+        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("daytap.record.toggle")
     }
 
-    /// 状态一枚小点:灰=闲,红=正在录。
-    private var statusDot: some View {
-        Circle()
-            .fill(model.phase == .recording ? Color.red : Color.gray)
-            .frame(width: 8, height: 8)
+    /// 录音中的音量环(#46):透明度跟音量,1.2s 呼吸放大;减少动态时只剩颜色变化。
+    @ViewBuilder
+    private var breathingRing: some View {
+        if model.phase == .recording {
+            let intensity = Double(max(min(model.level, 1), 0)) * 0.75 + 0.25
+            Circle()
+                .stroke(Color.red.opacity(intensity), lineWidth: 3)
+                .padding(6)
+                .scaleEffect(reduceMotion ? 1 : (ringPulse ? 1.08 : 1))
+                .onAppear {
+                    guard !reduceMotion else { return }
+                    withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                        ringPulse = true
+                    }
+                }
+                .accessibilityHidden(true)
+        }
     }
 
-    private var levelBar: some View {
-        Capsule()
-            .fill(Color.white.opacity(0.15))
-            .frame(height: 4)
-            .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(Color.red)
-                    .scaleEffect(
-                        x: CGFloat(max(model.level, 0.08)),
-                        y: 1,
-                        anchor: .leading
-                    )
+    /// 左上角传输角标(#44/#46):内缩 14pt,无待传无失败时完全不出现。
+    /// 待传=橙点+↑(≥2 条才出数字);失败优先,换成橙三角+条数——失败要处理,待传只是等待。
+    /// 点按打开传输 sheet(#45)。
+    @ViewBuilder
+    private var transferBadge: some View {
+        if model.transferFailed > 0 || model.transferWaiting > 0 {
+            let failed = model.transferFailed > 0
+            Button {
+                showTransferSheet = true
+            } label: {
+                HStack(spacing: 3) {
+                    if failed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("\(model.transferFailed)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .monospacedDigit()
+                    } else {
+                        Circle()
+                            .fill(badgeOrange)
+                            .frame(width: 6, height: 6)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 9, weight: .bold))
+                        if model.transferWaiting >= 2 {
+                            Text("\(model.transferWaiting)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                .foregroundStyle(badgeOrange)
+                .padding(8)
+                .contentShape(Rectangle())
             }
-            .accessibilityHidden(true)
+            .buttonStyle(.plain)
+            .padding(.top, 6)
+            .padding(.leading, 6)
+            .accessibilityLabel(
+                failed ? "\(model.transferFailed) 条传输失败" : "\(model.transferWaiting) 条待传"
+            )
+            .accessibilityIdentifier("daytap.transfer.badge")
+        }
     }
 }
