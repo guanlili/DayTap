@@ -1889,25 +1889,34 @@ private struct SettingsSheet: View {
 
                 // iCloud 备份(#56):全量默认(音频+文字),仅文字开关留给配额紧张;
                 // 状态可见不静默——未登录/空间不足/离线都在这里说话。
+                // 免费签名团队开不了 iCloud 能力(2026-11-12 定):整节收起只留状态说明。
                 Section {
-                    Toggle("iCloud 备份", isOn: $cloudEnabled)
-                    if cloudEnabled {
-                        Toggle("包含音频", isOn: $cloudAudio)
+                    if CloudSync.capabilityAvailable {
+                        Toggle("iCloud 备份", isOn: $cloudEnabled)
+                        if cloudEnabled {
+                            Toggle("包含音频", isOn: $cloudAudio)
+                            LabeledContent("状态", value: cloudSync.status.text)
+                            if cloudSync.cloudCount > 0 {
+                                LabeledContent(
+                                    "已备份",
+                                    value: "\(cloudSync.cloudCount) 条 · \(DayTapFormat.bytes(cloudSync.cloudBytes))"
+                                )
+                            }
+                            Button("立即同步") {
+                                cloudSync.syncNow()
+                            }
+                        }
+                    } else {
                         LabeledContent("状态", value: cloudSync.status.text)
-                        if cloudSync.cloudCount > 0 {
-                            LabeledContent(
-                                "已备份",
-                                value: "\(cloudSync.cloudCount) 条 · \(DayTapFormat.bytes(cloudSync.cloudBytes))"
-                            )
-                        }
-                        Button("立即同步") {
-                            cloudSync.syncNow()
-                        }
                     }
                 } header: {
                     Text("iCloud 备份")
                 } footer: {
-                    Text("录音与转写备份到你的 iCloud 私有空间，换机或重装可恢复。音频仅在 WiFi 且充电时上传；关闭「包含音频」只备文字，几 KB 一条。")
+                    Text(
+                        CloudSync.capabilityAvailable
+                            ? "录音与转写备份到你的 iCloud 私有空间，换机或重装可恢复。音频仅在 WiFi 且充电时上传；关闭「包含音频」只备文字，几 KB 一条。"
+                            : "备份能力已就绪，但当前签名账号是免费个人团队，无法开通 iCloud 权限；升级付费开发者账号后即可启用。"
+                    )
                 }
 
                 Section {

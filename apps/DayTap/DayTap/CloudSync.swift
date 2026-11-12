@@ -82,12 +82,20 @@ enum CloudSyncLogic {
 final class CloudSync: ObservableObject {
     static let shared = CloudSync()
 
+    /// 能力总闸(#56 泊车,2026-11-12 定):签名团队是免费个人账号,开不了 iCloud 能力,
+    /// entitlements 已从构建摘除。**付费开发者计划落地后:翻 true + 接回
+    /// CODE_SIGN_ENTITLEMENTS(见 issue #56 批审评论)即恢复**,代码零改动。
+    /// 关键:CKContainer(identifier:) 在无 entitlements 时抛 ObjC 异常且 Swift 捕不住,
+    /// 本闸(配合 container 的 lazy)保证它永远不会被构造。
+    static let capabilityAvailable = false
+
     enum Status: Equatable {
         case idle
         case noAccount
         case syncing
         case synced(Date)
         case disabled
+        case unavailable
         case failed(String)
 
         var text: String {
@@ -97,6 +105,7 @@ final class CloudSync: ObservableObject {
             case .syncing: "同步中…"
             case .synced(let date): "已同步 " + date.formatted(date: .omitted, time: .shortened)
             case .disabled: "未开启"
+            case .unavailable: "暂不可用（需付费开发者账号）"
             case .failed(let reason): "失败:" + reason
             }
         }
@@ -121,7 +130,8 @@ final class CloudSync: ObservableObject {
     private static let metaType = "CDMeta"
     private static let audioType = "CDAudio"
 
-    private let container = CKContainer(identifier: CloudSync.containerID)
+    /// lazy:只在能力闸放行后才可能被构造(见 capabilityAvailable 注释)。
+    private lazy var container: CKContainer = CKContainer(identifier: Self.containerID)
     private var database: CKDatabase { container.privateCloudDatabase }
     private let zoneID = CKRecordZone.default().zoneID
 
@@ -173,6 +183,10 @@ final class CloudSync: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        guard Self.capabilityAvailable else {
+            setStatus(.unavailable)
+            return
+        }
         NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
@@ -189,11 +203,19 @@ final class CloudSync: ObservableObject {
 
     /// 设置页「立即同步」。
     func syncNow() {
+        guard Self.capabilityAvailable else {
+            setStatus(.unavailable)
+            return
+        }
         Task { await refreshAccountThenSync() }
     }
 
     /// 设置变更:开关切换后立刻对齐(新开→补一波,关闭→停状态)。
     func settingsChanged() {
+        guard Self.capabilityAvailable else {
+            setStatus(.unavailable)
+            return
+        }
         if CloudSyncSettings.enabled {
             syncNow()
         } else {
