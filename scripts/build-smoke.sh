@@ -16,6 +16,11 @@ if ! xcodebuild -version >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "== 纯逻辑单测(DayTapCore, 秒级前置门) =="
+if [ -d "apps/DayTap/DayTapCore" ]; then
+  (cd apps/DayTap/DayTapCore && swift test 2>&1 | grep -E "error:|Executed" | tail -3)
+fi
+
 echo "== Xcode =="
 xcodebuild -version
 

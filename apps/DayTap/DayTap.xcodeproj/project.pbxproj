@@ -8,12 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		B1100000000000000000000A /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000003 /* WatchConnectivity.framework */; };
+		B1100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
 		B2100000000000000000000B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000004 /* AVFoundation.framework */; };
 		B2100000000000000000000C /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000003 /* WatchConnectivity.framework */; };
+		B2100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
 		B31000000000000000000001 /* DayTap Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000002 /* DayTap Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B51000000000000000000002 /* DayTapWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000005 /* DayTapWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		B1100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
-		B2100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* AudioCapture.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,10 +68,10 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA0000000000000000000005 /* DayTap */ = {isa = PBXFileSystemSynchronizedRootGroup;  explicitFileTypes = {}; explicitFolders = (); path = DayTap; sourceTree = "<group>"; };
+		AA0000000000000000000005 /* DayTap */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DayTap; sourceTree = "<group>"; };
 		AA0000000000000000000006 /* DayTapWatch */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DayTapWatch; sourceTree = "<group>"; };
-		AA0000000000000000000008 /* DayTapWidget */ = {isa = PBXFileSystemSynchronizedRootGroup;  explicitFileTypes = {}; explicitFolders = (); path = DayTapWidget; sourceTree = "<group>"; };
-		AA0000000000000000000009 /* DayTapCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = DayTapCore/Sources/DayTapCore; sourceTree = "<group>"; };
+		AA0000000000000000000008 /* DayTapWidget */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DayTapWidget; sourceTree = "<group>"; };
+		AA0000000000000000000009 /* DayTapCore/Sources/DayTapCore */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DayTapCore/Sources/DayTapCore; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +102,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		17781F2130A5DF5B00B3E508 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000009 /* DayTapCore/Sources/DayTapCore */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 		AA0000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
@@ -111,6 +119,7 @@
 				AA0000000000000000000008 /* DayTapWidget */,
 				AA0000000000000000000007 /* Frameworks */,
 				AA0000000000000000000003 /* Products */,
+				17781F2130A5DF5B00B3E508 /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -160,7 +169,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000005 /* DayTap */,
-				AA0000000000000000000009 /* DayTapCore */,
+				AA0000000000000000000009 /* DayTapCore/Sources/DayTapCore */,
 			);
 			name = DayTap;
 			productName = DayTap;
@@ -183,7 +192,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000006 /* DayTapWatch */,
-				AA0000000000000000000009 /* DayTapCore */,
+				AA0000000000000000000009 /* DayTapCore/Sources/DayTapCore */,
 			);
 			name = "DayTap Watch App";
 			productName = "DayTap Watch App";
@@ -371,7 +380,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Phone-Info.plist;
+				INFOPLIST_FILE = "Config/Phone-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -399,7 +408,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Phone-Info.plist;
+				INFOPLIST_FILE = "Config/Phone-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -427,7 +436,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Watch-Info.plist;
+				INFOPLIST_FILE = "Config/Watch-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -456,7 +465,7 @@
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Watch-Info.plist;
+				INFOPLIST_FILE = "Config/Watch-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -482,7 +491,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Widget-Info.plist;
+				INFOPLIST_FILE = "Config/Widget-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -509,7 +518,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Widget-Info.plist;
+				INFOPLIST_FILE = "Config/Widget-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -569,7 +578,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = AA0000000000000000000001 /* Project object */;
 }

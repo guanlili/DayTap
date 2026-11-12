@@ -23,8 +23,6 @@ final class WatchModel: ObservableObject {
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Float = 0
     @Published var status = ""
-    /// 传输通道的一句话状态(待传/送出/已确认),闲时小字展示。
-    @Published private(set) var linkStatus = ""
     /// 传输计数(#4):待 iPhone 确认 / 失败条数,闲时角标。
     @Published private(set) var transferWaiting = 0
     @Published private(set) var transferFailed = 0
@@ -57,7 +55,6 @@ final class WatchModel: ObservableObject {
             DayTapLog.motion.info("knock → begin")
             toggle()
         }
-        linkStatus = link.statusText
         syncTransferState()
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -145,7 +142,6 @@ final class WatchModel: ObservableObject {
 
     /// 从链路层同步一行状态与计数到发布属性。
     private func syncTransferState() {
-        linkStatus = link.statusText
         transferWaiting = link.waitingCount
         transferFailed = link.failedCount
         transferConfirmed = link.acknowledgedTotal
