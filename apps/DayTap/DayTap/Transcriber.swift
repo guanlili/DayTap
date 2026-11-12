@@ -12,6 +12,14 @@ import UIKit
 /// 接电源或电量≥50% 时前台串行消费;手动转写保留并优先。
 @MainActor
 final class TranscriptionCenter: ObservableObject {
+    private var batteryToken: NSObjectProtocol?
+    private var importedToken: NSObjectProtocol?
+
+    deinit {
+        // #63:token 式 addObserver 的标准坑——不存不移除,重构多实例即漏。
+        if let batteryToken { NotificationCenter.default.removeObserver(batteryToken) }
+        if let importedToken { NotificationCenter.default.removeObserver(importedToken) }
+    }
     /// 正在转写的录音 id。nil=空闲。转写中按钮变进度圈并禁用。
     @Published private(set) var activeID: String?
     /// 列表页展示的一行状态（下载模型/转写中/失败原因）。成功后清空，失败保留到下一次操作。
@@ -29,14 +37,14 @@ final class TranscriptionCenter: ObservableObject {
         // 电量监控默认关,打开才能读 batteryState/Level(#29 护栏)。
         UIDevice.current.isBatteryMonitoringEnabled = true
         // 插上电源那一刻,是清自动队列最自然的时机;收到新录音也立刻试一把(#29)。
-        NotificationCenter.default.addObserver(
+        batteryToken = NotificationCenter.default.addObserver(
             forName: UIDevice.batteryStateDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.drainAutoQueue() }
         }
-        NotificationCenter.default.addObserver(
+        importedToken = NotificationCenter.default.addObserver(
             forName: .daytapRecordImported,
             object: nil,
             queue: .main
@@ -63,12 +71,12 @@ final class TranscriptionCenter: ObservableObject {
             start(record)
             return
         }
-        // 正在转别的:不打断,插队下一轮。
-        pendingManualID = record.id
-        statusText = "已排队,当前这条转完就轮到它"
+        // 正在转别的:不打断,排队(#63 由单槽改队列——忙时第二条不再被静默丢弃)。
+        pendingManualIDs.append(record.id)
+        statusText = "已排队(第 \(pendingManualIDs.count) 位),前一条转完就轮到它"
     }
 
-    private var pendingManualID: String?
+    private var pendingManualIDs: [String] = []
 
     private func start(_ record: RecordingRecord) {
         let fileURL = library.fileURL(id: record.id)
@@ -102,10 +110,12 @@ final class TranscriptionCenter: ObservableObject {
         {
             autoFailedIDs.insert(id)
         }
-        if let next = pendingManualID, let record = library.record(id: next) {
-            pendingManualID = nil
-            start(record)
-            return
+        if !pendingManualIDs.isEmpty {
+            let nextID = pendingManualIDs.removeFirst()
+            if let record = library.record(id: nextID) {
+                start(record)
+                return
+            }
         }
         drainAutoQueue()
     }

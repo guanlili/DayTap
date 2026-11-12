@@ -7,9 +7,24 @@ import Foundation
 final class PlaybackCenter: ObservableObject {
     @Published private(set) var playingID: String?
     @Published private(set) var isPlaying = false
-    @Published private(set) var progress: Double = 0
-    @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    /// 高频走钟(#63):elapsed/progress 每 0.25s 跳,若挂在主 center 上,
+    /// 列表等一切观察者都跟着 4Hz 全量重算——拆进嵌套 Clock,只被真正需要
+    /// 逐帧的视图(行内播放条/跟读滚动)观察。
+    let clock = Clock()
+    var elapsed: TimeInterval { clock.elapsed }
+    var progress: Double { clock.progress }
+
+    final class Clock: ObservableObject {
+        @Published private(set) var elapsed: TimeInterval = 0
+        @Published private(set) var progress: Double = 0
+
+        fileprivate func set(elapsed: TimeInterval, progress: Double) {
+            self.elapsed = elapsed
+            self.progress = progress
+        }
+    }
+
     /// 倍速(#26):点击循环 1x→1.5x→2x,同一播放会话内跨条保留。
     @Published private(set) var rate: Float = 1.0
     /// 跳静音(#37):开着时落在分段间隙就跳到下一句起点。会话内跨条保留,同倍速口径;
@@ -95,11 +110,9 @@ final class PlaybackCenter: ObservableObject {
         activeSegments = record.transcriptSegments
         if offset > 0 {
             newPlayer.currentTime = min(offset, duration - 0.1)
-            elapsed = newPlayer.currentTime
-            progress = min(1, elapsed / duration)
+            clock.set(elapsed: newPlayer.currentTime, progress: min(1, newPlayer.currentTime / duration))
         } else {
-            elapsed = 0
-            progress = 0
+            clock.set(elapsed: 0, progress: 0)
         }
         startTimer()
     }
@@ -125,8 +138,7 @@ final class PlaybackCenter: ObservableObject {
         guard let player, playingID != nil, duration > 0 else { return }
         let clamped = min(max(fraction, 0), 0.995)
         player.currentTime = clamped * duration
-        elapsed = player.currentTime
-        progress = clamped
+        clock.set(elapsed: player.currentTime, progress: clamped)
     }
 
     /// 停止并复位。播完自动调用;列表刷新、切条、离开页面也由外部调用。
@@ -137,8 +149,7 @@ final class PlaybackCenter: ObservableObject {
         player = nil
         playingID = nil
         isPlaying = false
-        progress = 0
-        elapsed = 0
+        clock.set(elapsed: 0, progress: 0)
         duration = 0
         loadError = nil
         activeSegments = nil
@@ -151,8 +162,7 @@ final class PlaybackCenter: ObservableObject {
         player = nil
         playingID = nil
         isPlaying = false
-        progress = 0
-        elapsed = 0
+        clock.set(elapsed: 0, progress: 0)
         duration = 0
         loadError = nil
         activeSegments = nil
@@ -169,13 +179,11 @@ final class PlaybackCenter: ObservableObject {
 
     private func tick() {
         guard let player, playingID != nil else { return }
-        elapsed = player.currentTime
-        progress = min(1, elapsed / duration)
+        clock.set(elapsed: player.currentTime, progress: min(1, player.currentTime / duration))
         // 跳静音(#37):落在分段间隙就跳到下一句起点,0.25s 一查,跳跃即时反馈。
         if skipsSilence, let next = Self.nextSpeechStart(after: elapsed, in: activeSegments) {
             player.currentTime = next
-            elapsed = next
-            progress = min(1, elapsed / duration)
+            clock.set(elapsed: next, progress: min(1, next / duration))
         }
         // 播完:player 自己停了且不是我们按的暂停,静默复位。
         if !player.isPlaying, isPlaying {

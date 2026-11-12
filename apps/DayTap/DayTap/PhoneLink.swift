@@ -37,6 +37,44 @@ final class PhoneLink: NSObject, ObservableObject {
         library.purgeExpiredDeleted(retention: 30 * 24 * 3600)
         // #44:存量空时长异常(手表传过 33KB/0s 案)——按音频文件实测时长修复,只修有真实音频的。
         repairZeroDurations()
+        // 手机端孤儿扫描(#63):索引丢失/半写场景下音频还在但条目蒸发——后台补登,
+        // 与手表 reconcileOrphans 同口径(<1KB 壳删除)。冷启动不卡首帧。
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.adoptOrphanAudio()
+        }
+    }
+
+    /// Documents 里索引没有的音频→补登已确认条目(时长按实测);空壳删除。
+    private func adoptOrphanAudio() {
+        let known = Set(library.snapshot().map(\.id))
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: library.audioDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .creationDateKey]
+        ) else { return }
+        for url in urls where url.pathExtension.lowercased() == "m4a" {
+            let id = url.deletingPathExtension().lastPathComponent
+            guard !known.contains(id) else { continue }
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
+            guard let size = values?.fileSize, size >= 1024 else {
+                try? FileManager.default.removeItem(at: url)
+                DayTapLog.library.info("purged phone shell orphan \(id, privacy: .public)")
+                continue
+            }
+            var duration: Double = 0
+            if let player = try? AVAudioPlayer(contentsOf: url), player.duration > 1 {
+                duration = player.duration
+            }
+            library.upsert(RecordingRecord(
+                id: id,
+                createdAt: values?.creationDate ?? Date(),
+                durationSeconds: duration,
+                byteCount: size,
+                state: .acknowledged,
+                lastError: nil,
+                updatedAt: Date()
+            ))
+            DayTapLog.library.info("adopted phone orphan \(id, privacy: .public) bytes=\(size, privacy: .public)")
+        }
     }
 
     /// #44:durations <1s 但音频文件在且可读的,用 AVAudioPlayer 实测时长回填。
@@ -195,20 +233,29 @@ extension PhoneLink: WCSessionDelegate {
         // 必严格相等;原 90% 阈值会放行 90–100% 截断件——m4a 的 moov 在尾部,丢 8% 同样
         // 不可播,却照样回执→手表删原件→真丢。不等一律不保存不回执,手表自动重试。
         let receivedSize = (try? FileManager.default.attributesOfItem(atPath: file.fileURL.path)[.size] as? Int) ?? 0
-        if receivedSize != bytes {
-            DayTapLog.library.error("truncated arrival \(id, privacy: .public) expected=\(bytes, privacy: .public) got=\(receivedSize, privacy: .public); not acked")
-            // 拒收必须可见(#48 修正):publish 的文案只在「未连接」卡里渲染,连接正常时整条吞掉——
-            // 用户看到的就是"手机没反应"。改走通知进列表页 banner,带应/实收数字。
-            let message = "一条录音传输不完整（\(DayTapFormat.clock(duration))，应 \(DayTapFormat.bytes(bytes)) 实收 \(DayTapFormat.bytes(receivedSize))）——已拒收，原件在手表会重试"
+        // 可解码校验(#63):#58 实证「尺寸齐但 moov 没了」照样穿尺寸守门——
+        // AVAudioPlayer 打不开的件按损坏拒收,手表重传。冷路径,开销无感。
+        let decodable = (try? AVAudioPlayer(contentsOf: file.fileURL)) != nil
+        switch TransferGate.verdict(expected: bytes, received: receivedSize, decodable: decodable) {
+        case .accept:
+            break
+        case .rejectMismatch(let expected, let received):
+            DayTapLog.library.error("truncated arrival \(id, privacy: .public) expected=\(expected, privacy: .public) got=\(received, privacy: .public); not acked")
+            // 拒收必须可见(#48 修正):改走通知进列表页 banner,带应/实收数字。
+            let message = "一条录音传输不完整（\(DayTapFormat.clock(duration))，应 \(DayTapFormat.bytes(expected)) 实收 \(DayTapFormat.bytes(received))）——已拒收，原件在手表会重试"
             publish(status: message, ready: true)
             NotificationCenter.default.post(name: .daytapTransferRejected, object: message)
             return
-        }
-        // <1KB 空壳(#17/#59):finish 的 1024 下限本不该产出这种件(旧版孤儿回收可能造出),
-        // 到达即回执但不落库——手表清掉尾巴,也不给自动重试留死循环。
-        if bytes < 1024 {
+        case .dropShell:
+            // <1KB 空壳(#17/#59):回执但不落库——手表清掉尾巴,不给重试留死循环。
             DayTapLog.library.error("shell arrival \(id, privacy: .public) bytes=\(bytes, privacy: .public); acked & dropped")
             session.transferUserInfo(TransferKeys.ackMetadata(id: id))
+            return
+        case .rejectUndecodable:
+            DayTapLog.library.error("undecodable arrival \(id, privacy: .public) bytes=\(receivedSize, privacy: .public); not acked")
+            let message = "一条录音传到后打不开（文件损坏，\(DayTapFormat.clock(duration))）——已拒收，原件在手表会重试"
+            publish(status: message, ready: true)
+            NotificationCenter.default.post(name: .daytapTransferRejected, object: message)
             return
         }
         // 让位(#48 收尾→#59 收紧为不等即让):完好的来件若撞上尺寸对不上的既有副本
@@ -259,11 +306,15 @@ extension PhoneLink: WCSessionDelegate {
             let expected = TransferKeys.doubleValue(item[TransferKeys.byteCount])
             let url = library.fileURL(id: id)
             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Double) ?? 0
-            // #59 收紧:尺寸严格相等才算完好——0.9 阈值会把 90–100% 截断件裁成「已有」并
-            // 回执,手表删原件后手机永远持有不可播残件(moov 在尾部,差 8% 一样坏)。
-            let intact = library.record(id: id) != nil
-                && FileManager.default.fileExists(atPath: url.path)
-                && fileSize == expected
+            // #59/#63:尺寸齐还要打得开——本地副本若已损坏,裁成「已有」会让手表删原件。
+            let decodable = (try? AVAudioPlayer(contentsOf: url)) != nil
+            let intact = TransferGate.intact(
+                indexed: library.record(id: id) != nil,
+                fileExists: FileManager.default.fileExists(atPath: url.path),
+                expected: expected,
+                fileSize: fileSize,
+                decodable: decodable
+            )
             if intact {
                 acked.append(id)
             } else {

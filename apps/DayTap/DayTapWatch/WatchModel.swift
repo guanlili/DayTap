@@ -10,6 +10,7 @@ import WatchKit
 /// 2026-11-10 甲方真机体验后定夺撤下:环境音误触太容易(模拟器验证时已见端倪),
 /// 改回**手动触发**(点按/握拳),但保留 #5 的核心收益——audio 后台模式,录着回表盘继续。
 /// VAD 与滚动缓冲的实现(见 AudioCapture.startBuffer/promote)留在代码里备 v2 调参后回归。
+@MainActor
 final class WatchModel: ObservableObject {
     /// AppIntent 与界面共用同一个实例,握拳和点屏幕操作的是同一台状态机。
     static let shared = WatchModel()

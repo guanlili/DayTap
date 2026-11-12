@@ -12,6 +12,8 @@ struct TranscriptView: View {
     @ObservedObject var library: RecordingLibrary
     @ObservedObject var transcriber: TranscriptionCenter
     @ObservedObject var player: PlaybackCenter
+    /// 高频走钟(#63):跟读滚动与迷你条观察 clock,不牵动观察 player 的整屏。
+    @ObservedObject var clock: PlaybackCenter.Clock
 
     /// 完成态落库(#61/#62):手动勾选写回索引;重新转写会整体重算待办(勾选重置),类别纠偏保留。
     private func toggleDone(_ updated: ActionItem) {
@@ -176,7 +178,7 @@ struct TranscriptView: View {
               let segments = record?.transcriptSegments, !segments.isEmpty
         else { return nil }
         var found: Int?
-        for (index, segment) in segments.enumerated() where segment.start <= player.elapsed + 0.01 {
+        for (index, segment) in segments.enumerated() where segment.start <= clock.elapsed + 0.01 {
             found = index
         }
         return found
@@ -235,11 +237,11 @@ struct TranscriptView: View {
                         .font(.footnote)
                         .frame(width: 26, height: 26)
                 }
-                Text(DayTapFormat.clock(player.elapsed))
+                Text(DayTapFormat.clock(clock.elapsed))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Slider(value: Binding(
-                    get: { player.progress },
+                    get: { clock.progress },
                     set: { player.scrub(to: $0) }
                 ), in: 0...1)
                 .tint(.red)

@@ -304,3 +304,31 @@ func testActionItemMixedArrayDecodes() throws {
     XCTAssertEqual(items.map(\.text), ["发货", "旧样式"])
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #63 TransferGate
+
+/// 守门语义钉死:精确匹配/壳丢弃/坏件拒收(#58 家族的回归网)。
+func testTransferGateArrivalVerdicts() {
+    XCTAssertEqual(TransferGate.verdict(expected: 1024, received: 1024, decodable: true), .accept)
+    XCTAssertEqual(
+        TransferGate.verdict(expected: 100_000, received: 92_000, decodable: true),
+        .rejectMismatch(expected: 100_000, received: 92_000)
+    )
+    // #58 实证:尺寸齐但结构坏(moov 缺失)照样穿尺寸守门——必须拒。
+    XCTAssertEqual(TransferGate.verdict(expected: 119_839, received: 119_839, decodable: false), .rejectUndecodable)
+    XCTAssertEqual(TransferGate.verdict(expected: 28, received: 28, decodable: false), .dropShell)
+    // 多一个字节也不行:等长是唯一完好口径。
+    XCTAssertEqual(
+        TransferGate.verdict(expected: 50_000, received: 50_001, decodable: true),
+        .rejectMismatch(expected: 50_000, received: 50_001)
+    )
+}
+
+func testTransferGateIntact() {
+    XCTAssertTrue(TransferGate.intact(indexed: true, fileExists: true, expected: 9_000, fileSize: 9_000, decodable: true))
+    XCTAssertFalse(TransferGate.intact(indexed: true, fileExists: true, expected: 9_000, fileSize: 8_100, decodable: true))
+    XCTAssertFalse(TransferGate.intact(indexed: true, fileExists: true, expected: 9_000, fileSize: 9_000, decodable: false))
+    XCTAssertFalse(TransferGate.intact(indexed: false, fileExists: true, expected: 9_000, fileSize: 9_000, decodable: true))
+}
+}
