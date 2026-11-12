@@ -7,6 +7,8 @@ final class DayTapAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         PhoneLink.shared.activate()
+        // iCloud 备份(#56):启动即查账号拉一轮,之后库变更去抖推+回前台触发。
+        CloudSync.shared.start()
         DayTapLog.link.info("iPhone application launched")
         return true
     }

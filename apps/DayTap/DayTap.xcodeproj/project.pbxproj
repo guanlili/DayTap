@@ -19,6 +19,7 @@
 		B1100000000000000000000C /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000008 /* Transcriber.swift */; };
 		B1100000000000000000000D /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000003 /* AudioCapture.swift */; };
 		B1100000000000000000000E /* PhoneRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* PhoneRecorder.swift */; };
+		B1100000000000000000000F /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000A /* CloudSync.swift */; };
 		B11000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* Assets.xcassets */; };
 		B1100000000000000000000A /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000003 /* WatchConnectivity.framework */; };
 		B21000000000000000000001 /* DayTapLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* DayTapLog.swift */; };
@@ -95,6 +96,8 @@
 		F20000000000000000000007 /* PlaybackCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackCenter.swift; sourceTree = "<group>"; };
 		F20000000000000000000008 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
 		F20000000000000000000009 /* PhoneRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRecorder.swift; sourceTree = "<group>"; };
+		F2000000000000000000000A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
+		F2000000000000000000000B /* DayTap.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DayTap.entitlements; sourceTree = "<group>"; };
 		F20000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F20000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F30000000000000000000001 /* DayTapWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTapWatchApp.swift; sourceTree = "<group>"; };
@@ -177,6 +180,8 @@
 				F20000000000000000000007 /* PlaybackCenter.swift */,
 				F20000000000000000000008 /* Transcriber.swift */,
 				F20000000000000000000009 /* PhoneRecorder.swift */,
+				F2000000000000000000000A /* CloudSync.swift */,
+				F2000000000000000000000B /* DayTap.entitlements */,
 				F20000000000000000000005 /* Info.plist */,
 				F20000000000000000000006 /* Assets.xcassets */,
 			);
@@ -371,6 +376,7 @@
 				B1100000000000000000000C /* Transcriber.swift in Sources */,
 				B1100000000000000000000D /* AudioCapture.swift in Sources */,
 				B1100000000000000000000E /* PhoneRecorder.swift in Sources */,
+				B1100000000000000000000F /* CloudSync.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -468,6 +474,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = DayTap/DayTap.entitlements;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -496,6 +503,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = DayTap/DayTap.entitlements;
 				DEVELOPMENT_TEAM = BR3SB4Q4BV;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;

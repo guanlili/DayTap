@@ -1761,9 +1761,12 @@ private struct ReviewSheet: View {
 /// 模型候选可选+自定义兜底、key 唯一必填,配完一键连通性测试;摘要只是第一个消费者。
 private struct SettingsSheet: View {
     @ObservedObject var transcriber: TranscriptionCenter
+    @ObservedObject private var cloudSync = CloudSync.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var llmEnabled: Bool
+    @State private var cloudEnabled = CloudSyncSettings.enabled
+    @State private var cloudAudio = CloudSyncSettings.includeAudio
     @State private var provider: LLMProviderID
     @State private var customBaseURL: String
     @State private var modelSelection: String
@@ -1884,6 +1887,29 @@ private struct SettingsSheet: View {
                     }
                 }
 
+                // iCloud 备份(#56):全量默认(音频+文字),仅文字开关留给配额紧张;
+                // 状态可见不静默——未登录/空间不足/离线都在这里说话。
+                Section {
+                    Toggle("iCloud 备份", isOn: $cloudEnabled)
+                    if cloudEnabled {
+                        Toggle("包含音频", isOn: $cloudAudio)
+                        LabeledContent("状态", value: cloudSync.status.text)
+                        if cloudSync.cloudCount > 0 {
+                            LabeledContent(
+                                "已备份",
+                                value: "\(cloudSync.cloudCount) 条 · \(DayTapFormat.bytes(cloudSync.cloudBytes))"
+                            )
+                        }
+                        Button("立即同步") {
+                            cloudSync.syncNow()
+                        }
+                    }
+                } header: {
+                    Text("iCloud 备份")
+                } footer: {
+                    Text("录音与转写备份到你的 iCloud 私有空间，换机或重装可恢复。音频仅在 WiFi 且充电时上传；关闭「包含音频」只备文字，几 KB 一条。")
+                }
+
                 Section {
                     LabeledContent("版本", value: "开发版")
                 } header: {
@@ -1894,6 +1920,14 @@ private struct SettingsSheet: View {
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: cloudEnabled) { _, on in
+                CloudSyncSettings.enabled = on
+                cloudSync.settingsChanged()
+            }
+            .onChange(of: cloudAudio) { _, on in
+                CloudSyncSettings.includeAudio = on
+                cloudSync.settingsChanged()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }

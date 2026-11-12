@@ -21,6 +21,8 @@ xcodebuild -version
 
 echo "== pbxproj lint =="
 plutil -lint "$PROJ/project.pbxproj"
+# 注意(#56):手机 target 带 CloudKit entitlements,本脚本免签(CODE_SIGNING_ALLOWED=NO)产物
+# 缺 entitlements,CKContainer(identifier:) 会在启动时抛异常闪退——免签产物只验编译,别拿去跑。
 
 build_one() {
   local scheme="$1" dest="$2" name="$3"
