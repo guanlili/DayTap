@@ -1,7 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 全文页(#30/#32):时间戳分段渲染、点句跳播、跟读滚动;无分段旧转写降级纯文本。
+/// 全文 sheet(#16 → #32 时间戳模式):点句子=跳到那一刻播放;播放时当前句高亮+跟读滚动;
+/// 底部内嵌迷你播放条,拖它高亮跟着走(双向锚定)。无分段的老转写退回纯文本。
+/// 顶栏保留 重新转写/分享文字,底栏 复制全文 与播放条并存。
 struct TranscriptView: View {
     let recordID: String
     @ObservedObject var library: RecordingLibrary

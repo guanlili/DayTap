@@ -1,7 +1,8 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 本周回顾(#43):条数/时长/类别分布/待办汇总,纯本地聚合。
+/// 本周回顾(#43):把攒了一周的录音看见——概览/类别分布/待办汇总,数据全现成,纯本地聚合。
+/// 滚动「最近 7 天」而非卡历周,避免周一重置割裂周末;仅统计未删除条目。
 struct ReviewSheet: View {
     let records: [RecordingRecord]
     @Environment(\.dismiss) private var dismiss
@@ -32,10 +33,11 @@ struct ReviewSheet: View {
     }
 
     /// 待办汇总(最近 7 天):按录音归组,带来源标题。
-    private var todoGroups: [(title: String, items: [String])] {
+    private var todoGroups: [(id: String, title: String, items: [String])] {
         weekRecords.compactMap { record in
             guard let items = record.actionItems, !items.isEmpty else { return nil }
-            return (title: ReviewSheet.rowTitle(record), items: items)
+            // id 用录音 id:两条同名(都叫「晨会」)时 ForEach(id: \.title) 会撞(#59)
+            return (id: record.id, title: ReviewSheet.rowTitle(record), items: items)
         }
     }
 
@@ -78,7 +80,7 @@ struct ReviewSheet: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(todoGroups, id: \.title) { group in
+                            ForEach(todoGroups, id: \.id) { group in
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(group.title)
                                         .font(.subheadline.weight(.semibold))
@@ -142,5 +144,3 @@ struct ReviewSheet: View {
     }
 }
 
-/// 设置(#40→#42):配置归设置。AI 模型节=LLM 配置中心——预设厂商可选不填、
-/// 模型候选可选+自定义兜底、key 唯一必填,配完一键连通性测试;摘要只是第一个消费者。

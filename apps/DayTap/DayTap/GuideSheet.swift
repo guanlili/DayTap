@@ -1,7 +1,6 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// 使用指南(#24/#40 瘦身后):知识/工作流/配置三分,自解释的不进指南。
+/// 使用指南(#15→#24/#40 瘦身):原首屏文字墙收纳于此→知识/工作流/配置三分,自解释的不进指南。
 struct GuideSheet: View {
     @Environment(\.dismiss) private var dismiss
 

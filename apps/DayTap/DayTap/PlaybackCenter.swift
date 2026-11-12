@@ -30,12 +30,12 @@ final class PlaybackCenter: ObservableObject {
         toggle(record, fileURL: fileURL, at: 0)
     }
 
-    /// 带定位的启停(#32→#55 修回归):带 offset(搜索命中/点句跳播)=定位并确保在播;
-    /// 不带 offset(行/播放键/迷你条)=真·启停切换——暂停分支在 #32 重构时丢失,
-    /// 表现为"播着点暂停没反应"。
-    func toggle(_ record: RecordingRecord, fileURL: URL, at offset: TimeInterval) {
+    /// 带定位的启停(#32→#55 修回归→#59):带 offset(搜索命中/点句跳播,含 0=回开头)
+    /// =定位并确保在播;不带 offset(行/播放键/迷你条)=真·启停切换。
+    /// 原 `offset > 0` 把「跳到第一句/命中在 0s」退化成暂停(#59)。
+    func toggle(_ record: RecordingRecord, fileURL: URL, at offset: TimeInterval? = nil) {
         if playingID == record.id, let player {
-            if offset > 0 {
+            if let offset {
                 scrub(to: offset / max(duration, 0.1))
                 if !isPlaying {
                     player.play()
@@ -52,7 +52,7 @@ final class PlaybackCenter: ObservableObject {
             }
             return
         }
-        start(record: record, fileURL: fileURL, at: offset)
+        start(record: record, fileURL: fileURL, at: offset ?? 0)
     }
 
     private func start(record: RecordingRecord, fileURL: URL, at offset: TimeInterval = 0) {

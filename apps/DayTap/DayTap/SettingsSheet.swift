@@ -1,7 +1,8 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 设置(#40):AI 模型(#42 LLM 配置中心)+iCloud 备份(#56 泊车态)+关于。
+/// 设置(#40→#42):配置归设置。AI 模型节=LLM 配置中心——预设厂商可选不填、
+/// 模型候选可选+自定义兜底、key 唯一必填,配完一键连通性测试;摘要只是第一个消费者。
 struct SettingsSheet: View {
     @ObservedObject var transcriber: TranscriptionCenter
     @ObservedObject private var cloudSync = CloudSync.shared

@@ -794,7 +794,8 @@ struct RecordingListView: View {
                             Circle().fill(active ? Color.red : Color.accentColor.opacity(0.12))
                         )
                 }
-                .disabled(!fileExists)
+                // #59:手机录音中禁播——播放会切音频会话类别,大概率掐断正在进行的录音
+                .disabled(!fileExists || recorder.isRecording)
                 .buttonStyle(.borderless)
                 .accessibilityLabel(playing ? "暂停" : "试听")
                 .accessibilityIdentifier("daytap.play.\(record.id)")
@@ -1045,6 +1046,3 @@ struct RecordingListView: View {
     }
 }
 
-/// 全文 sheet(#16 → #32 时间戳模式):点句子=跳到那一刻播放;播放时当前句高亮+跟读滚动;
-/// 底部内嵌迷你播放条,拖它高亮跟着走(双向锚定)。无分段的老转写退回纯文本。
-/// 顶栏保留 重新转写/分享文字,底栏 复制全文 与播放条并存。

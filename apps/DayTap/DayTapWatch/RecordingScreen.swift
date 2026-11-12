@@ -13,6 +13,11 @@ struct RecordingScreen: View {
     @State private var showTransferSheet = false
     @State private var ringPulse = false
     @State private var savedFlash = false
+    /// 长按成功的 suppress 窗口(#59):onTap/onLongPress 并挂时,部分系统长按松手还会补一发
+    /// tap——把正在录的误停。窗口内 tap 一律吞掉。
+    @State private var suppressTapUntil = Date.distantPast
+    /// savedFlash 序号(#59):0.35s 内二次停录时,旧闭包不掐灭新一闪。
+    @State private var flashToken = 0
 
     /// #46 角标专用橙(#FF9500),失败与待传同色——不换位置、不加句子。
     private let badgeOrange = Color(red: 255 / 255, green: 149 / 255, blue: 0 / 255)
@@ -55,6 +60,10 @@ struct RecordingScreen: View {
         .sheet(isPresented: $showTransferSheet) {
             TransferSheet(model: model)
         }
+        .onChange(of: showTransferSheet) { _, shown in
+            // #59:sheet 打开期间撤敲桌监听,关闭恢复闲时监听——不在遮罩后面开录。
+            model.setKnockListening(!shown)
+        }
         .onAppear {
             model.onAppear()
             model.setKnockListening(true)
@@ -68,7 +77,8 @@ struct RecordingScreen: View {
                 // audio 后台模式:录音继续,不在这里停(#5);敲桌监听只在前台开。
                 model.setKnockListening(false)
             case .inactive:
-                break
+                // #59:下拉通知中心等半失活态也不听敲桌——否则在看不见的地方静默开录。
+                model.setKnockListening(false)
             @unknown default:
                 break
             }
@@ -78,8 +88,13 @@ struct RecordingScreen: View {
             model.setKnockListening(phase == .idle)
             ringPulse = false
             if old == .recording, phase == .idle, model.status.isEmpty {
+                flashToken += 1
+                let token = flashToken
                 savedFlash = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { savedFlash = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    guard token == flashToken else { return }
+                    savedFlash = false
+                }
             }
         }
     }
@@ -99,6 +114,7 @@ struct RecordingScreen: View {
         .overlay { breathingRing }
         .opacity(model.permissionDenied ? 0.35 : 1)
         .onTapGesture {
+            guard Date() >= suppressTapUntil else { return }
             guard !model.permissionDenied else {
                 WKInterfaceDevice.current().play(.failure)
                 return
@@ -106,6 +122,11 @@ struct RecordingScreen: View {
             model.toggle()
         }
         .onLongPressGesture(minimumDuration: 0.6) {
+            suppressTapUntil = Date().addingTimeInterval(0.8)
+            showTransferSheet = true
+        }
+        // VO 可达(#59):长按是隐藏手势,给 VoiceOver 显式动作。
+        .accessibilityAction(named: Text("传输详情")) {
             showTransferSheet = true
         }
         .accessibilityLabel(
@@ -166,7 +187,9 @@ struct RecordingScreen: View {
                     }
                 }
                 .foregroundStyle(badgeOrange)
+                // #59:热区扩到 44×44(watchOS HIG 最小可点目标);内衬 8+外衬 6=视觉仍钉 14pt 内缩。
                 .padding(8)
+                .frame(minWidth: 44, minHeight: 44, alignment: .topLeading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

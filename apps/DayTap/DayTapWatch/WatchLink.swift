@@ -360,11 +360,14 @@ extension WatchLink: WCSessionDelegate {
             TransferKeys.id: $0.id,
             TransferKeys.byteCount: $0.byteCount
         ] }
+        // errorHandler 必须给(#59):可达性在 guard 与 send 之间翻转时,无 handler 的
+        // sendMessage 会抛 NSException 崩表;对账本就多路重试,丢了无害。
         session.sendMessage([
             TransferKeys.kind: TransferKeys.kindReconcile,
             TransferKeys.items: items
         ]) { reply in
             DispatchQueue.main.async { self.applyReconcileReply(reply) }
+        } errorHandler: { _ in
         }
     }
 

@@ -71,8 +71,9 @@ final class TranscriptionCenter: ObservableObject {
                 afterCompletion(id: record.id)
             }
             do {
+                // run 内部在「转写成功、digest 未说话」时自行清状态;这里不再兜底清空——
+                // 否则 digest 写下的可见性提示(本机不可用/云端失败/AI 未配全)会被当场抹掉(#59)
                 try await run(record: record, fileURL: fileURL)
-                statusText = nil
             } catch {
                 DayTapLog.transcribe.error("transcribe \(record.id, privacy: .public) failed \(error.localizedDescription, privacy: .public)")
                 statusText = "转文字失败：\(error.localizedDescription)"
@@ -196,6 +197,9 @@ final class TranscriptionCenter: ObservableObject {
         // 模型不可用→全留 nil(未分类/时刻名),不影响转写落库。
         if fresh.transcript != nil,
            fresh.category == nil || fresh.summary == nil || fresh.autoTitle == nil {
+            // 转写本体已成功:此刻清掉「正在转写…」;digest 若有话说(不可用/失败)会再设——
+            // #59:start() 不再兜底清,清场职责移到这里。
+            statusText = nil
             let result = await digest(transcript: trimmed)
             if fresh.category == nil {
                 fresh.category = result?.category

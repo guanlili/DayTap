@@ -49,14 +49,21 @@ final class AudioCapture {
             AVEncoderBitRateKey: 48_000,
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
         ]
-        let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
-        recorder.isMeteringEnabled = true
-        recorder.prepareToRecord()
-        guard recorder.record() else {
-            throw CaptureError.failedToStart
+        // #59:会话已激活,后续任何失败都要先熄会话再抛——否则表顶麦克风指示常亮,用户以为还在偷录。
+        do {
+            let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
+            recorder.isMeteringEnabled = true
+            recorder.prepareToRecord()
+            guard recorder.record() else {
+                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+                throw CaptureError.failedToStart
+            }
+            self.recorder = recorder
+            self.fileURL = fileURL
+        } catch {
+            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            throw error
         }
-        self.recorder = recorder
-        self.fileURL = fileURL
         DayTapLog.recorder.info("recording started \(fileURL.lastPathComponent, privacy: .public)")
     }
 

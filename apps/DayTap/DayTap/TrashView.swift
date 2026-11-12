@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 最近删除(#26):软删条目恢复/彻底删/清空,30 天到期由 PhoneLink 启动清扫。
 struct TrashView: View {
@@ -77,4 +76,3 @@ struct TrashView: View {
     }
 }
 
-/// 使用指南(#15):原首屏文字墙收纳于此,内容一字不丢,只换排版。

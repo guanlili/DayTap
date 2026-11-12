@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 导出(#38→#41):格式(Markdown/纯文本/JSON)×内容(完整/仅摘要卡)选项页,ExportBuilder 同源拼装。
 enum ExportFormat: String, CaseIterable, Identifiable {
@@ -198,5 +197,3 @@ struct ExportSheet: View {
     }
 }
 
-/// 本周回顾(#43):把攒了一周的录音看见——概览/类别分布/待办汇总,数据全现成,纯本地聚合。
-/// 滚动「最近 7 天」而非卡历周,避免周一重置割裂周末;仅统计未删除条目。
