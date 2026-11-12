@@ -92,3 +92,4 @@ corpus/sessions/**
 
 # 博客草稿与配图,仅本地
 blog/
+.zcode/
