@@ -33,6 +33,22 @@ final class RecordingLibrary: ObservableObject {
         audioDirectory.appendingPathComponent(TransferKeys.filename(for: id))
     }
 
+    /// 批量入册(#67):一次落盘一次刷新——孤儿收编等 N 条场景,原逐条 upsert
+    /// = N 次全量写 index.json + N 次列表跳变。
+    @discardableResult
+    func upsertBatch(_ records: [RecordingRecord]) -> Bool {
+        guard !records.isEmpty else { return true }
+        return mutate { storage in
+            for record in records {
+                if let index = storage.firstIndex(where: { $0.id == record.id }) {
+                    storage[index] = record
+                } else {
+                    storage.append(record)
+                }
+            }
+        }
+    }
+
     /// 返回 false=索引落盘失败(磁盘满等),调用方据此不回执(#59:手表保留原件而非删)。
     @discardableResult
     func upsert(_ record: RecordingRecord) -> Bool {

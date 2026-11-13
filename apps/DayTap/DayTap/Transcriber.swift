@@ -63,7 +63,24 @@ final class TranscriptionCenter: ObservableObject {
         stale.autoTitle = nil
         stale.actionItems = nil
         library.upsert(stale)
+        // #67:预清先留底——转写失败时派生字段(含用户勾选态)可回滚,
+        // 不停在「旧全文+无摘要+无待办」的裸态。
+        retranscribeBackup[record.id] = (record.summary, record.autoTitle, record.actionItems)
         transcribe(record)
+    }
+
+    /// 重转预清前的派生字段快照(#67 失败回滚用)。
+    private var retranscribeBackup: [String: (summary: String?, autoTitle: String?, actions: [ActionItem]?)] = [:]
+
+    private func rollbackRetranscribe(id: String) {
+        guard let backup = retranscribeBackup.removeValue(forKey: id),
+              var fresh = library.record(id: id)
+        else { return }
+        fresh.summary = backup.summary
+        fresh.autoTitle = backup.autoTitle
+        fresh.actionItems = backup.actions
+        library.upsert(fresh)
+        DayTapLog.transcribe.info("retranscribe rollback \(id, privacy: .public)")
     }
 
     func transcribe(_ record: RecordingRecord) {
@@ -71,17 +88,32 @@ final class TranscriptionCenter: ObservableObject {
             start(record)
             return
         }
-        // 正在转别的:不打断,排队(#63 由单槽改队列——忙时第二条不再被静默丢弃)。
+        // 正在转别的:不打断,排队(#63 队列化;#67 去重——同一条连点不重复全量转写)。
+        guard !pendingManualIDs.contains(record.id) else { return }
         pendingManualIDs.append(record.id)
         statusText = "已排队(第 \(pendingManualIDs.count) 位),前一条转完就轮到它"
     }
 
     private var pendingManualIDs: [String] = []
 
+    /// 手动队列泵(#67):跳过文件已不存在的,取到可转的下一条即启;队列空则回自动队列。
+    private func drainManualQueue() {
+        while !pendingManualIDs.isEmpty {
+            let nextID = pendingManualIDs.removeFirst()
+            if let record = library.record(id: nextID),
+               FileManager.default.fileExists(atPath: library.fileURL(id: nextID).path) {
+                start(record)
+                return
+            }
+        }
+    }
+
     private func start(_ record: RecordingRecord) {
         let fileURL = library.fileURL(id: record.id)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             statusText = "找不到这条音频文件"
+            // #67:手动队列在这里断链(原 return 后续排队永久滞留)——继续排空下一条。
+            drainManualQueue()
             return
         }
         activeID = record.id
@@ -97,6 +129,8 @@ final class TranscriptionCenter: ObservableObject {
             } catch {
                 DayTapLog.transcribe.error("transcribe \(record.id, privacy: .public) failed \(error.localizedDescription, privacy: .public)")
                 statusText = "转文字失败：\(error.localizedDescription)"
+                // #67:重转预清过的条目,失败时把派生字段滚回来(含用户勾选态)。
+                rollbackRetranscribe(id: record.id)
             }
         }
     }
@@ -110,13 +144,7 @@ final class TranscriptionCenter: ObservableObject {
         {
             autoFailedIDs.insert(id)
         }
-        if !pendingManualIDs.isEmpty {
-            let nextID = pendingManualIDs.removeFirst()
-            if let record = library.record(id: nextID) {
-                start(record)
-                return
-            }
-        }
+        drainManualQueue()
         drainAutoQueue()
     }
 
@@ -234,6 +262,7 @@ final class TranscriptionCenter: ObservableObject {
             }
         }
         fresh.updatedAt = Date()
+        retranscribeBackup.removeValue(forKey: record.id)
         library.upsert(fresh)
         DayTapLog.transcribe.info("transcribed \(record.id, privacy: .public) chars=\(trimmed.count) segments=\(segments.count, privacy: .public) category=\(fresh.category ?? "-", privacy: .public) autoTitle=\(fresh.autoTitle ?? "-", privacy: .public) hasSummary=\(fresh.summary != nil)")
     }
@@ -370,7 +399,16 @@ final class TranscriptionCenter: ObservableObject {
                 statusText = "AI 整理失败：回复不是有效 JSON（转写不受影响）"
                 return nil
             }
-            let payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
+            let payload: Payload
+            do {
+                payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
+            } catch {
+                // #67:小模型常见尾逗号/裸键等非严格 JSON——原样透出 Cocoa 3840 文案没人懂;
+                // 统一口径+留原始回复前 200 字做诊断。
+                DayTapLog.transcribe.info("cloud digest bad json head=\(text[start...].prefix(200), privacy: .public)")
+                statusText = "AI 整理失败：回复不是有效 JSON（转写不受影响）"
+                return nil
+            }
             let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
             var seen = Set<String>()
             let actions = (payload.actionItems ?? [])

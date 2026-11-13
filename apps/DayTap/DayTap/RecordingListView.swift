@@ -603,6 +603,11 @@ struct RecordingListView: View {
             }
         } else {
             Button {
+                // #67:先播后录——开录前停掉播放器,否则播放 tick 的自动收摊
+                // (内含熄会话)会把刚开的录音掐死(#65 同源病灶的另一入口)。
+                if player.playingID != nil {
+                    player.reset()
+                }
                 recorder.toggle()
             } label: {
                 Image(systemName: "mic.fill")
@@ -936,10 +941,6 @@ struct RecordingListView: View {
     /// 试听进度(#26):时间行(中间倍速钮)+可拖动定位的红 slider。
     private func playbackBar(_ record: RecordingRecord) -> some View {
         PlaybackBarView(player: player, record: record)
-    }
-
-    private var speedLabel: String {
-        player.rate == 1.5 ? "1.5x" : (player.rate == 2.0 ? "2x" : "1x")
     }
 
     /// 行标题(#29→#36):手动名 > 自动短标题 > 时刻;日期已上移到分组头,手动名永远赢。

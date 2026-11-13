@@ -21,6 +21,9 @@ final class PhoneLink: NSObject, ObservableObject {
     @Published private(set) var status = "等手表把录音传过来"
     @Published private(set) var sessionReady = false
 
+    /// 手机端正在录制的 id(#67):领养扫描跳过(在录文件不是孤儿,#66 同款闸)。
+    var activePhoneRecordingID: String?
+
     /// 已删除录音的 id 名单(#20)。手表可能还握着「传输未完成」的尾巴,
     /// 重传到这里时直接回执丢弃,不让删掉的条目复活。UserDefaults 重装即清,
     /// 但那时手表侧早已确认,本就不会再传。
@@ -44,36 +47,57 @@ final class PhoneLink: NSObject, ObservableObject {
         }
     }
 
-    /// Documents 里索引没有的音频→补登已确认条目(时长按实测);空壳删除。
+    /// Documents 里索引没有的音频→补登已确认条目。
+    /// 口径(#67 收紧):Documents 是 Files App 可写的共享目录,用户自己的文件不能动——
+    /// 只碰 id 形如 UUID 的文件(DayTap 的命名),其余一律跳过(不领养、不删除、不上传);
+    /// 在录文件(60s 内修改过或 id=在录标记)跳过;UUID 形态但打不开的崩溃残件删除(手表同口径)。
     private func adoptOrphanAudio() {
-        let known = Set(library.snapshot().map(\.id))
+        func isOurs(_ id: String) -> Bool {
+            UUID(uuidString: id)?.uuidString == id
+        }
+        var adopted: [RecordingRecord] = []
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: library.audioDirectory,
-            includingPropertiesForKeys: [.fileSizeKey, .creationDateKey]
+            includingPropertiesForKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey]
         ) else { return }
         for url in urls where url.pathExtension.lowercased() == "m4a" {
             let id = url.deletingPathExtension().lastPathComponent
-            guard !known.contains(id) else { continue }
-            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
-            guard let size = values?.fileSize, size >= 1024 else {
+            guard isOurs(id) else { continue }  // 用户的文件:完全不动
+            if library.record(id: id) != nil { continue }  // 重查,绕过陈旧快照(冷启动收件竞态)
+            if id == activePhoneRecordingID { continue }
+            let values = try? url.resourceValues(
+                forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey]
+            )
+            // 60s 内动过的文件可能在写(收件半拷贝/在录),下轮再看。
+            if let modified = values?.contentModificationDate,
+               Date().timeIntervalSince(modified) < 60 { continue }
+            guard let size = values?.fileSize else { continue }
+            guard size >= 1024 else {
                 try? FileManager.default.removeItem(at: url)
                 DayTapLog.library.info("purged phone shell orphan \(id, privacy: .public)")
                 continue
             }
-            var duration: Double = 0
-            if let player = try? AVAudioPlayer(contentsOf: url), player.duration > 1 {
-                duration = player.duration
+            guard let player = try? AVAudioPlayer(contentsOf: url), player.duration > 0 else {
+                // UUID 形态但 moov 没写完的崩溃残件:发不上也播不了,删(手表同口径);
+                // 播得了才领养——不给列表进 0 秒哑弹。
+                try? FileManager.default.removeItem(at: url)
+                DayTapLog.library.info("purged undecodable phone orphan \(id, privacy: .public)")
+                continue
             }
-            library.upsert(RecordingRecord(
+            adopted.append(RecordingRecord(
                 id: id,
                 createdAt: values?.creationDate ?? Date(),
-                durationSeconds: duration,
+                durationSeconds: max(player.duration, 0),
                 byteCount: size,
                 state: .acknowledged,
                 lastError: nil,
                 updatedAt: Date()
             ))
-            DayTapLog.library.info("adopted phone orphan \(id, privacy: .public) bytes=\(size, privacy: .public)")
+        }
+        // #67:批量一次落盘(原逐条 upsert=每条全量写索引+逐条刷列表,冷启动跳变)。
+        if !adopted.isEmpty {
+            library.upsertBatch(adopted)
+            DayTapLog.library.info("adopted phone orphans count=\(adopted.count, privacy: .public)")
         }
     }
 
@@ -307,7 +331,12 @@ extension PhoneLink: WCSessionDelegate {
             let url = library.fileURL(id: id)
             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Double) ?? 0
             // #59/#63:尺寸齐还要打得开——本地副本若已损坏,裁成「已有」会让手表删原件。
-            let decodable = (try? AVAudioPlayer(contentsOf: url)) != nil
+            // #67:尺寸不符直接短路不解码——原实现对每条 pending 都开一次 AVAudioPlayer,
+            // 几十条×18MB 长录会把 WCSession 串行回调队列卡住秒级。
+            let sizeMatches = library.record(id: id) != nil
+                && FileManager.default.fileExists(atPath: url.path)
+                && fileSize == expected
+            let decodable = sizeMatches && (try? AVAudioPlayer(contentsOf: url)) != nil
             let intact = TransferGate.intact(
                 indexed: library.record(id: id) != nil,
                 fileExists: FileManager.default.fileExists(atPath: url.path),

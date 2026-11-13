@@ -56,8 +56,10 @@ final class PhoneRecorder: ObservableObject {
         let start = { [weak self] in
             guard let self else { return }
             let id = UUID().uuidString
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("daytap-phone-\(id).m4a")
+            // #67:直写库目录(原写 tmp,App 被杀=moov 未写+内存态全丢,整条蒸发无兜底)。
+            // 库内文件崩溃后走孤儿回收口径;在录期间由 PhoneLink.activePhoneRecordingID
+            // 挡住领养(#66 同款闸)。
+            let url = library.fileURL(id: id)
             do {
                 try capture.start(fileURL: url)
             } catch {
@@ -66,6 +68,7 @@ final class PhoneRecorder: ObservableObject {
                 return
             }
             recordingID = id
+            PhoneLink.shared.activePhoneRecordingID = id
             startedAt = Date()
             elapsed = 0
             level = 0
@@ -105,12 +108,12 @@ final class PhoneRecorder: ObservableObject {
         let beganAt = startedAt
         isRecording = false
         recordingID = nil
+        PhoneLink.shared.activePhoneRecordingID = nil
         startedAt = nil
         statusText = reason
         guard let id, let beganAt else { return }
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("daytap-phone-\(id).m4a")
+        let url = library.fileURL(id: id)
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size >= 1024 else {
             try? FileManager.default.removeItem(at: url)
@@ -129,9 +132,8 @@ final class PhoneRecorder: ObservableObject {
             updatedAt: Date()
         )
         record.origin = "phone"
-        // 录进文稿目录、按真实落盘大小覆盖 byteCount、状态置已确认——手表收件走的是同一扇门。
+        // 文件已在库位:importAudio 走「目标存在跳过复制」分支,只做时长兜底+入库+索引落盘校验。
         library.importAudio(from: url, record: record)
-        try? FileManager.default.removeItem(at: url)
         statusText = reason
         // 通知转写中心试清自动队列(#29)。
         NotificationCenter.default.post(name: .daytapRecordImported, object: nil)
@@ -139,13 +141,22 @@ final class PhoneRecorder: ObservableObject {
 
     private func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // #67:.common mode——录音中滚动列表时(default mode 暂停)计时/音量不停走。
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.isRecording, let startedAt = self.startedAt else { return }
+                // #67 心跳兜底:任何外因把录音器掐死(类别被切/系统抢麦,不触发中断通知),
+                // 主动收尾保存——对齐手表 onActive 口径,计时器不再空转骗人。
+                if !self.capture.isRecording {
+                    self.finish(reason: "录音被系统停下，已保存")
+                    return
+                }
                 self.elapsed = Date().timeIntervalSince(startedAt)
                 self.level = self.capture.currentLevel()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     private func stopTimer() {

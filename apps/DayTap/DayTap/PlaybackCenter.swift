@@ -71,6 +71,12 @@ final class PlaybackCenter: ObservableObject {
     }
 
     private func start(record: RecordingRecord, fileURL: URL, at offset: TimeInterval = 0) {
+        // #67:录音中禁止一切播放入口(行点/命中跳播/点句/迷你条在,start 汇总拦)——
+        // 播放会切走共享音频会话类别,录音静默死亡且不触发中断通知,#60 只禁了按钮不够。
+        if PhoneLink.shared.activePhoneRecordingID != nil {
+            loadError = "录音中不能试听——先停一下录音"
+            return
+        }
         // #60 遗留:切条只停播放器,不再整场 reset——原实现每次切条都向系统广播一次
         // 「我停了」再立刻重激活,别的音频 App 会被无谓打断。
         stopPlayer()
@@ -101,6 +107,8 @@ final class PlaybackCenter: ObservableObject {
         guard activated, newPlayer.play() else {
             DayTapLog.library.error("playback failed to start \(record.id, privacy: .public)")
             loadError = "没法开始播放（音频会话没就绪）。再点一次试试。"
+            // #67:会话已激活却没播成——熄掉,与加载失败路径对称,不留挂起会话。
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
             return
         }
         player = newPlayer
