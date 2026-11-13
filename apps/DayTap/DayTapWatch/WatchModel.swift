@@ -174,6 +174,7 @@ final class WatchModel: ObservableObject {
         }
         phase = .idle
         recordingID = nil
+        link.activeRecordingID = nil
         startedAt = nil
         WKInterfaceDevice.current().play(.stop)
         status = "已丢弃,点一下重新开始"
@@ -196,6 +197,8 @@ final class WatchModel: ObservableObject {
                 return
             }
             self.recordingID = id
+            // #65:在录文件不归孤儿回收管(见 WatchLink.activeRecordingID)。
+            link.activeRecordingID = id
             self.startedAt = Date()
             self.elapsed = 0
             self.level = 0
@@ -238,6 +241,7 @@ final class WatchModel: ObservableObject {
         let startedAt = startedAt
         phase = .idle
         recordingID = nil
+        link.activeRecordingID = nil
         self.startedAt = nil
         WKInterfaceDevice.current().play(.stop)
 

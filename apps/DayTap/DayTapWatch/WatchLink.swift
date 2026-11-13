@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import WatchConnectivity
 
@@ -193,6 +194,12 @@ final class WatchLink: NSObject {
         DayTapLog.link.info("purged settled count=\(settled.count, privacy: .public)")
     }
 
+    /// 正在录制的录音 id(#65):长录中途按表冠回表盘(后台续录),再回 App 时
+    /// retryPending→reconcileOrphans 会把这个「还没 finish 的在录文件」当孤儿领养——
+    /// 按当时的半个尺寸入册排队,之后文件继续长,发到手机的与元数据永远对不上,拒收死循环。
+    /// WatchModel begin/finish 维护此值,主线程读写。
+    var activeRecordingID: String?
+
     /// 崩溃或被系统杀掉时，目录里可能有 m4a 但索引没有。补一条待传记录。
     private func reconcileOrphans() {        let folder = library.audioDirectory
         guard let urls = try? FileManager.default.contentsOfDirectory(
@@ -203,12 +210,22 @@ final class WatchLink: NSObject {
         for url in urls where url.pathExtension.lowercased() == "m4a" {
             let id = url.deletingPathExtension().lastPathComponent
             if known.contains(id) { continue }
+            // #65:正在录制的文件不是孤儿——它还没 finish,此刻领养=按半个尺寸入册,
+            // 之后文件继续长,元数据与实物永远对不上(真机实证:报 50KB 实收 18.1MB)。
+            if id == activeRecordingID { continue }
             let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
             // <1KB 只有容器头的空壳(#17/#59):录到一半被杀的残件,入册重传只会穿到手机
             // 列表变 0 秒哑弹——与 finish 的 1024 下限同口径,直接删。
             if let size = values?.fileSize, size < 1024 {
                 try? FileManager.default.removeItem(at: url)
                 DayTapLog.link.info("purged shell orphan \(id, privacy: .public) size=\(size, privacy: .public)")
+                continue
+            }
+            // #65:≥1KB 但打不开的(moov 没写完的崩溃残件)也删——发到手机必被
+            // 可解码守门拒收,留在目录里只会每轮领养-重传死循环;音频本身已不可救。
+            if (try? AVAudioPlayer(contentsOf: url)) == nil {
+                try? FileManager.default.removeItem(at: url)
+                DayTapLog.link.info("purged undecodable orphan \(id, privacy: .public)")
                 continue
             }
             let record = RecordingRecord(
