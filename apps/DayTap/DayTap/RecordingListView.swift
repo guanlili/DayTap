@@ -187,10 +187,7 @@ struct RecordingListView: View {
                 transcriber.drainAutoQueue()
             } else if phase != .inactive {
                 player.reset()
-                // 手机不开后台模式:退后台即停录保存(#3),与手表同口径。
-                if recorder.isRecording {
-                    recorder.toggle()
-                }
+                // #64:audio 后台模式已开,退后台只停播,录音续录(对齐语音备忘录与手表端)。
             }
         }
         .alert("重命名", isPresented: renameBinding) {

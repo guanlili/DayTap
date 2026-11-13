@@ -4,7 +4,7 @@ import Foundation
 
 /// 手机端直接录音(#3):复用手表的 AudioCapture 出 m4a,
 /// 停止走 importAudio 入口,与手表传来的录音同库同列表混排(origin="phone" 标来源)。
-/// 仅前台:手机 App 不开 UIBackgroundModes,退后台由界面层停录保存(与手表同口径)。
+/// #64 起 audio 后台模式已开:退后台/锁屏续录(与手表、语音备忘录同口径),停录只由用户触发。
 @MainActor
 final class PhoneRecorder: ObservableObject {
     @Published private(set) var isRecording = false
