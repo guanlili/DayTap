@@ -186,8 +186,12 @@ struct RecordingListView: View {
                 // 回前台顺一把自动转写队列(#29)。
                 transcriber.drainAutoQueue()
             } else if phase != .inactive {
-                player.reset()
-                // #64:audio 后台模式已开,退后台只停播,录音续录(对齐语音备忘录与手表端)。
+                // #64/#65:录音中绝不能 reset 播放器——reset 会熄掉共享音频会话,
+                // 把正在进行的后台录音掐死(实测录几分钟只剩前台十几秒)。
+                // 录音中本来也没有播放(#60 已禁),不 reset 无损失。
+                if !recorder.isRecording {
+                    player.reset()
+                }
             }
         }
         .alert("重命名", isPresented: renameBinding) {
