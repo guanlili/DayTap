@@ -221,6 +221,19 @@ struct SettingsSheet: View {
             }
             .navigationTitle("我的")
             .navigationBarTitleDisplayMode(.inline)
+            // #96 修正:tab 常驻的设置页没有「保存完关页」的语义——按 HIG 改了即存:
+            // 开关/选择即时落库,文本框(含 Keychain 的 key)离开本页时落;
+            // 键盘随滚动收起,别再盖住底栏的 tab。
+            .scrollDismissesKeyboard(.immediately)
+            .onDisappear { persist() }
+            .onChange(of: llmEnabled) { _, _ in persist() }
+            .onChange(of: provider) { _, newProvider in
+                // 换厂商,模型候选跟随重置;自定义模型名清空待填。
+                modelSelection = newProvider.defaultModel.isEmpty ? Self.customModelTag : newProvider.defaultModel
+                customModel = ""
+                persist()
+            }
+            .onChange(of: modelSelection) { _, _ in persist() }
             .onChange(of: cloudEnabled) { _, on in
                 CloudSyncSettings.enabled = on
                 cloudSync.settingsChanged()
@@ -228,19 +241,6 @@ struct SettingsSheet: View {
             .onChange(of: cloudAudio) { _, on in
                 CloudSyncSettings.includeAudio = on
                 cloudSync.settingsChanged()
-            }
-            .toolbar {
-                // #82 迁入「我的」tab:取消随 sheet 语义消失,改完点保存即落。
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") {
-                        persist()
-                    }
-                }
-            }
-            .onChange(of: provider) { _, newProvider in
-                // 换厂商,模型候选跟随重置;自定义模型名清空待填。
-                modelSelection = newProvider.defaultModel.isEmpty ? Self.customModelTag : newProvider.defaultModel
-                customModel = ""
             }
         }
     }
