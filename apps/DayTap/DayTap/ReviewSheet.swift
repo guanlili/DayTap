@@ -143,24 +143,25 @@ struct ReviewSheet: View {
             .navigationTitle("成长")
             .navigationBarTitleDisplayMode(.inline)
             // #82 tab 常驻:完成按钮随 sheet 语义移除;跳到出处后播什么,底部说。
-            .safeAreaInset(edge: .bottom) {
-                if let playingID = player.playingID,
-                   let record = library.records.first(where: { $0.id == playingID }) {
-                    PlaybackBarView(player: player, record: record)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .bottomBar) {
+            // bottomBar ToolbarItem 在 TabView 里会被标签栏吞掉(同录音红钮坑),改 safeAreaInset。
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 8) {
                     if !todoGroups.isEmpty {
                         Button {
                             UIPasteboard.general.string = todoText
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                         } label: {
                             Label("复制全部待办", systemImage: "checklist")
+                                .font(.subheadline)
                         }
                         .accessibilityIdentifier("daytap.review.copyTodos")
                     }
+                    if let playingID = player.playingID,
+                       let record = library.records.first(where: { $0.id == playingID }) {
+                        PlaybackBarView(player: player, record: record)
+                    }
                 }
+                .padding(.vertical, 8)
             }
         }
     }

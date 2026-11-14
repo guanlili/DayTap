@@ -142,13 +142,6 @@ struct RecordingListView: View {
                     .accessibilityLabel("更多操作")
                     .accessibilityIdentifier("daytap.more")
                 }
-                ToolbarItem(placement: .bottomBar) {
-                    if isEditing {
-                        batchBar
-                    } else {
-                        recordControl
-                    }
-                }
             }
         }
         .fileExporter(
@@ -385,6 +378,21 @@ struct RecordingListView: View {
             if !isEditing {
                 categoryChips
             }
+        }
+        // 底栏录音钮(#3→#82 修正):iOS 26 里 bottomBar ToolbarItem 进 TabView 会被
+        // 液态玻璃标签栏吞掉(真机实测红钮直接消失),改 safeAreaInset 钉在列表底,
+        // 与 Day 页播放条同一手法,稳定浮在标签栏上方。
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                if isEditing {
+                    batchBar
+                } else {
+                    recordControl
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
     }
 
