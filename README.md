@@ -4,6 +4,8 @@
 
 > DayTap · 腕上日录:手表上按一下,回到手机时,它已经是文字、摘要和待办。
 
+**功能介绍(用户视角完整版)→ [`docs/product-intro.md`](docs/product-intro.md)**
+
 **没有 TestFlight,也没有可点的安装包,只能 Mac + Xcode 侧载**(无 `.xcworkspace`,双击 `apps/DayTap/DayTap.xcodeproj` 即开):
 
 ```bash
@@ -148,6 +150,7 @@ v2 候选池:降噪 / 自定义类别 · 多标签 / 日历视图 / 音频 zip �
 
 ## 更多文档
 
+- 功能介绍(用户视角完整版):[`docs/product-intro.md`](docs/product-intro.md)
 - 架构与数据流(早期版):[`docs/architecture.md`](docs/architecture.md)
 - 手表工程:打开 / 签名 / 传输 / 限制 → [`docs/daytap-watch-app.md`](docs/daytap-watch-app.md)
 - 早期 MVP 路线档案(得到双轨 Track 0/1/2、方案 A/B、演示脚本、公众号提纲):`docs/tech-path.md`、`docs/scheme-b-apple-native.md`、`docs/watch-two-tracks.md`、`docs/mvp-demo-script.md` 等,口径以本 README 为准
