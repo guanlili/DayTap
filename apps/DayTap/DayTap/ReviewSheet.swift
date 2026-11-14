@@ -1,12 +1,11 @@
 import SwiftUI
 
-/// 本周回顾(#43→#82 迁入成长 tab):条数/时长/类别分布/待办汇总,纯本地聚合。
+/// 成长 tab(#43→#82):一周的量与分布——概览 + 类别分布,纯本地聚合。
 /// 滚动「最近 7 天」而非卡历周,避免周一重置割裂周末;仅统计未删除条目。
-/// #82 起常驻 tab:records 改由 library 实时推导(录音页 ⋯ 菜单的 sheet 入口已移除)。
+/// 待办已归「计划」tab(今日+逾期聚合),这里不再重复展示(2026-11-14 甲方定);
+/// 录音页 ⋯ 菜单的 sheet 入口随 #82 移除,records 由 library 实时推导。
 struct ReviewSheet: View {
     @ObservedObject var library: RecordingLibrary
-    /// #75 待办回链:跳出处要起播——与各页共用同一个 PlaybackCenter,播放态互通。
-    @ObservedObject var player: PlaybackCenter
 
     private var records: [RecordingRecord] { library.records }
 
@@ -34,39 +33,6 @@ struct ReviewSheet: View {
             return lhs.name < rhs.name
         }
     }
-
-    /// 待办汇总(最近 7 天):按录音归组,带来源标题。
-    /// 勾选落库(#61):本周回顾里也能勾,与摘要卡同一条数据。
-    private func toggleDone(_ recordID: String, _ updated: ActionItem) {
-        guard var fresh = library.record(id: recordID),
-              var items = fresh.actionItems,
-              let index = items.firstIndex(where: { $0.id == updated.id })
-        else { return }
-        items[index] = updated
-        fresh.actionItems = items
-        fresh.updatedAt = Date()  // 勾选也是变更(#62)
-        library.upsert(fresh)
-    }
-
-    /// #75 待办回链:找到锚点才有「跳到出处」;tab 常驻后不再关页——
-    /// 跳播即起,底部播放条(与 Day 页同款)让「什么在响」可见。
-    private func jumpToSource(recordID: String, item: ActionItem) -> (() -> Void)? {
-        guard let record = records.first(where: { $0.id == recordID }),
-              let anchor = ActionItemAnchor.offset(for: item.text, segments: record.transcriptSegments ?? [])
-        else { return nil }
-        return { player.toggle(record, fileURL: library.fileURL(id: record.id), at: anchor) }
-    }
-
-    private var todoGroups: [(id: String, title: String, recordID: String, items: [ActionItem])] {
-        weekRecords.compactMap { record in
-            guard let items = record.actionItems, !items.isEmpty else { return nil }
-            // id 用录音 id:两条同名(都叫「晨会」)时 ForEach(id: \.title) 会撞(#59)
-            return (id: record.id, title: ReviewSheet.rowTitle(record), recordID: record.id, items: items)
-        }
-    }
-
-    /// 待办行反馈一行(#61)。
-    @State private var reviewFeedback = ""
 
     var body: some View {
         NavigationStack {
@@ -100,103 +66,14 @@ struct ReviewSheet: View {
                             }
                         }
                     }
-
-                    Section("待办 · 最近 7 天") {
-                        if todoGroups.isEmpty {
-                            Text("这一周的录音里没有提到待办")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(todoGroups, id: \.id) { group in
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(group.title)
-                                        .font(.subheadline.weight(.semibold))
-                                    // #70:混有「别人答应的」才分组,纯行动项不加头标。
-                                    ForEach(Array(group.items.directionGroups.enumerated()), id: \.offset) { _, sub in
-                                        if let label = sub.label {
-                                            Text(label)
-                                                .font(.caption2.weight(.semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        ForEach(sub.items) { item in
-                                            ActionItemRow(
-                                                item: item,
-                                                sourceTitle: group.title,
-                                                onToggleDone: { updated in toggleDone(group.recordID, updated) },
-                                                onJumpToSource: jumpToSource(recordID: group.recordID, item: item),
-                                                feedback: $reviewFeedback
-                                            )
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 2)
-                            }
-                            if !reviewFeedback.isEmpty {
-                                Text(reviewFeedback)
-                                    .font(.caption2)
-                                    .foregroundStyle(Color.secondary)
-                            }
-                        }
-                    }
                 }
             }
             .navigationTitle("成长")
             .navigationBarTitleDisplayMode(.inline)
-            // #82 tab 常驻:完成按钮随 sheet 语义移除;跳到出处后播什么,底部说。
-            // bottomBar ToolbarItem 在 TabView 里会被标签栏吞掉(同录音红钮坑),改 safeAreaInset。
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 8) {
-                    if !todoGroups.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = todoText
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        } label: {
-                            Label("复制全部待办", systemImage: "checklist")
-                                .font(.subheadline)
-                        }
-                        .accessibilityIdentifier("daytap.review.copyTodos")
-                    }
-                    if let playingID = player.playingID,
-                       let record = library.records.first(where: { $0.id == playingID }) {
-                        PlaybackBarView(player: player, record: record)
-                    }
-                }
-                .padding(.vertical, 8)
-            }
         }
-    }
-
-    /// 「复制全部待办」的文本:按来源分组,与摘要卡同符号体系(#70:混向再分两层)。
-    private var todoText: String {
-        "【待办 · 最近 7 天】\n" + todoGroups.map { group in
-            "■ \(group.title)\n" + group.items.directionGroups.compactMap { sub in
-                let lines = sub.items.map { item -> String in
-                    var line = "· \(item.text)"
-                    if let due = item.dueAt {
-                        line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
-                    }
-                    if item.isDone { line += " ✓" }
-                    return line
-                }
-                guard !lines.isEmpty else { return nil }
-                return (sub.label.map { "○ \($0)\n" } ?? "") + lines.joined(separator: "\n")
-            }.joined(separator: "\n")
-        }.joined(separator: "\n\n")
     }
 
     private static func durationText(_ records: [RecordingRecord]) -> String {
         DayTapFormat.clock(records.reduce(0) { $0 + $1.durationSeconds })
     }
-
-    /// 来源标题与列表同口径:手动名 > 自动短标题 > 日期+时刻(跨天场景日期更有辨识度)。
-    private static func rowTitle(_ record: RecordingRecord) -> String {
-        if let name = record.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            return name
-        }
-        if let auto = record.autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !auto.isEmpty {
-            return auto
-        }
-        return record.createdAt.formatted(date: .abbreviated, time: .shortened)
-    }
 }
-

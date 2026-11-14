@@ -27,7 +27,7 @@ struct MainTabView: View {
             RecordingListView(player: player, transcriber: transcriber)
                 .tabItem { Label("记录", systemImage: "waveform") }
                 .tag(Tab.records)
-            ReviewSheet(library: PhoneLink.shared.library, player: player)
+            ReviewSheet(library: PhoneLink.shared.library)
                 .tabItem { Label("成长", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(Tab.growth)
             SettingsSheet(transcriber: transcriber)
