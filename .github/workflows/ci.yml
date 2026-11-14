@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-smoke:
+    name: 单测 + 双端冒烟
+    runs-on: macos-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选最新 Xcode(部署目标 iOS 26 需 26+)
+        run: |
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+
+      - name: DayTapCore 单测(纯逻辑,秒级门)
+        run: |
+          cd apps/DayTap/DayTapCore
+          swift test
+
+      - name: 双 target 免签冒烟构建 + pbxproj lint
+        run: |
+          ./scripts/build-smoke.sh
