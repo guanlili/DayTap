@@ -555,60 +555,8 @@ final class TranscriptionCenter: ObservableObject {
             statusText = "AI 模型配置无效（服务商 / 模型 / API Key），转写不受影响"
             return nil
         }
-        struct Payload: Decodable {
-            var category: String?
-            var title: String?
-            var summary: String?
-            // #61:actionItems 兼容两种形态——新 [{text,due,direction}] 与旧裸字符串数组。
-            var actionItems: [CloudAction]?
-            // #85 v1:提到的人;没抽到给 nil。
-            var people: [String]?
-        }
         do {
-            let reply = try await client.chat(
-                system: "你整理中文语音录音的转写全文,只依据全文内容作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组),people(人名数组,只列转写里明确提到的人,优先用背景段里给过的规范写法,没有给空数组)。",
-                user: Self.digestContext + "\n" + String(transcript.prefix(4000))
-            )
-            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-            // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
-            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
-                DayTapLog.transcribe.info("cloud digest no json in reply")
-                statusText = "AI 整理失败：回复不是有效 JSON（转写不受影响）"
-                return nil
-            }
-            let payload: Payload
-            do {
-                payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
-            } catch {
-                // #67:小模型常见尾逗号/裸键等非严格 JSON——原样透出 Cocoa 3840 文案没人懂;
-                // 统一口径+留原始回复前 200 字做诊断。
-                DayTapLog.transcribe.info("cloud digest bad json head=\(text[start...].prefix(200), privacy: .public)")
-                statusText = "AI 整理失败：回复不是有效 JSON（转写不受影响）"
-                return nil
-            }
-            let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
-            var seen = Set<String>()
-            let actions = (payload.actionItems ?? [])
-                .compactMap { raw -> ActionItem? in
-                    guard let text = raw.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !text.isEmpty,
-                          seen.insert(text).inserted  // 同文去重(#62)
-                    else { return nil }
-                    return ActionItem(
-                        text: text,
-                        dueAt: raw.due.flatMap(ActionItem.parseDue),
-                        direction: raw.direction.flatMap(ActionDirection.init)
-                    )
-                }
-            let people = Array(Set((payload.people ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }.map { String($0.prefix(12)) })).sorted()
-            return DigestResult(
-                category: category,
-                title: payload.title.flatMap { $0.isEmpty ? nil : String($0.prefix(12)) },
-                summary: payload.summary.flatMap { $0.isEmpty ? nil : $0 },
-                actions: actions.isEmpty ? nil : actions,
-                people: people.isEmpty ? nil : people
-            )
+            return try await cloudStyleDigest(transcript: transcript, client: client)
         } catch let error as LLMClient.CallError {
             DayTapLog.transcribe.info("cloud digest failed \(error.message, privacy: .public)")
             statusText = "AI 整理失败：\(error.message)（转写不受影响）"
@@ -618,6 +566,78 @@ final class TranscriptionCenter: ObservableObject {
             statusText = "AI 整理失败：\(error.localizedDescription)（转写不受影响）"
             return nil
         }
+    }
+
+    /// #77 同题对照:用**临时配置**(不落库,关页即弃)对同一段转写出一份摘要。
+    /// 不写库、不动 statusText——错误原样抛给对照页自己说。
+    func compareDigest(transcript: String, baseURL: String, model: String, apiKey: String) async throws -> CompareResult {
+        guard let client = LLMClient(baseURL: baseURL, model: model, apiKey: apiKey) else {
+            throw LLMClient.CallError(message: "临时配置不全（Base URL / 模型 / API Key）")
+        }
+        let result = try await cloudStyleDigest(transcript: transcript, client: client)
+        return CompareResult(title: result.title, summary: result.summary, actions: result.actions)
+    }
+
+    /// 同题对照的只读结果(#77):类别/人物不入对照卡,聚焦标题·摘要·待办三样肉眼可比。
+    struct CompareResult: Equatable {
+        var title: String?
+        var summary: String?
+        var actions: [ActionItem]?
+    }
+
+    /// 云端口径的摘要核(#77 从 cloudDigest 抽出共用):同一 prompt(#71 关于我 + 前 4000 字)、
+    /// 同一套宽容 JSON 解析——所配配置与临时配置跑的是一模一样的输入,对照才公平。
+    private func cloudStyleDigest(transcript: String, client: LLMClient) async throws -> DigestResult {
+        struct Payload: Decodable {
+            var category: String?
+            var title: String?
+            var summary: String?
+            // #61:actionItems 兼容两种形态——新 [{text,due,direction}] 与旧裸字符串数组。
+            var actionItems: [CloudAction]?
+            // #85 v1:提到的人;没抽到给 nil。
+            var people: [String]?
+        }
+        let reply = try await client.chat(
+            system: "你整理中文语音录音的转写全文,只依据全文内容作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组),people(人名数组,只列转写里明确提到的人,优先用背景段里给过的规范写法,没有给空数组)。",
+            user: Self.digestContext + "\n" + String(transcript.prefix(4000))
+        )
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
+            DayTapLog.transcribe.info("cloud digest no json in reply")
+            throw LLMClient.CallError(message: "回复不是有效 JSON")
+        }
+        let payload: Payload
+        do {
+            payload = try JSONDecoder().decode(Payload.self, from: Data(text[start...end].utf8))
+        } catch {
+            // #67:小模型常见尾逗号/裸键等非严格 JSON——统一文案+留原始回复前 200 字做诊断。
+            DayTapLog.transcribe.info("cloud digest bad json head=\(text[start...].prefix(200), privacy: .public)")
+            throw LLMClient.CallError(message: "回复不是有效 JSON")
+        }
+        let category = RecordingCategory.presets.first { (payload.category ?? "").contains($0) }
+        var seen = Set<String>()
+        let actions = (payload.actionItems ?? [])
+            .compactMap { raw -> ActionItem? in
+                guard let text = raw.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !text.isEmpty,
+                      seen.insert(text).inserted  // 同文去重(#62)
+                else { return nil }
+                return ActionItem(
+                    text: text,
+                    dueAt: raw.due.flatMap(ActionItem.parseDue),
+                    direction: raw.direction.flatMap(ActionDirection.init)
+                )
+            }
+        let people = Array(Set((payload.people ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.map { String($0.prefix(12)) })).sorted()
+        return DigestResult(
+            category: category,
+            title: payload.title.flatMap { $0.isEmpty ? nil : String($0.prefix(12)) },
+            summary: payload.summary.flatMap { $0.isEmpty ? nil : $0 },
+            actions: actions.isEmpty ? nil : actions,
+            people: people.isEmpty ? nil : people
+        )
     }
 
     /// 连通性测试(#42):设置页一键验配——别等第一条录音失败才发现配错。
@@ -695,14 +715,16 @@ final class TranscriptionCenter: ObservableObject {
 
     // MARK: - Day 页今日安排(#80 P0)
 
-    /// 排程入口(#80):输入=今天的待办与日历忙段;引擎同摘要三级瀑布(本机优先→云端兜底→nil)。
-    /// 失败不置 statusText——排程是用户主动按的,结果空由 Day 页自己说话,不混进转写状态流。
-    func daySuggestions(todos: [String], busy: [String]) async -> [DayAgenda.Suggestion]? {
+    /// 排程入口(#80):输入=今天的待办、日历忙段与健康概况(#80-P1:睡眠/步数等聚合量,静默读取,无授权即无此段);
+    /// 引擎同摘要三级瀑布(本机优先→云端兜底→nil)。失败不置 statusText——排程是用户主动按的,
+    /// 结果空由 Day 页自己说话,不混进转写状态流。
+    func daySuggestions(todos: [String], busy: [String], health: String? = nil) async -> [DayAgenda.Suggestion]? {
         let todoBlock = todos.isEmpty ? "（无）" : todos.joined(separator: "\n")
         let busyBlock = busy.isEmpty ? "（无）" : busy.joined(separator: "\n")
         let user = Self.digestContext
             + "\n今天的待办:\n" + todoBlock
             + "\n今天日历已占用的时段:\n" + busyBlock
+            + (health.map { "\n健康概况(安排强度时参考):\n\($0)" } ?? "")
             + "\n现在是" + nowLine() + "。请给今天剩余时间 2–4 条安排建议。"
         let model = SystemLanguageModel.default
         if model.isAvailable, let list = await onDeviceDayPlan(user: user, model: model) {

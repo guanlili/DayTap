@@ -168,16 +168,21 @@ struct LLMClient {
 
     /// 读 LLMSettings 现配;配置不全返回 nil。
     init?() {
-        let base = LLMSettings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.init(baseURL: LLMSettings.baseURL, model: LLMSettings.model, apiKey: LLMSecrets.loadKey() ?? "")
+    }
+
+    /// #77 同题对照:一次性临时配置,不落库、不进 Keychain,关页即弃。
+    init?(baseURL: String, model: String, apiKey: String) {
+        let base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let model = LLMSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: "\(base)/chat/completions"),
               !model.isEmpty,
-              let key = LLMSecrets.loadKey(), !key.isEmpty
+              !apiKey.isEmpty
         else { return nil }
         self.requestURL = url
         self.model = model
-        self.key = key
+        self.key = apiKey
     }
 
     /// 单轮对话,返回 assistant 文本;失败抛带面向用户文案的 CallError(含 HTTP 码)。

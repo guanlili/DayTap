@@ -7,6 +7,8 @@ import SwiftUI
 struct TranscriptView: View {
     /// 待办行操作反馈(添加到提醒事项/日历/复制的就地一行)。
     @State private var actionFeedback = ""
+    // 同题对照(#77):presented 用 sheet(item:),record 即对照对象。
+    @State private var compareRecord: RecordingRecord?
 
     let recordID: String
     @ObservedObject var library: RecordingLibrary
@@ -109,11 +111,24 @@ struct TranscriptView: View {
                         }
                         .disabled(record?.transcript == nil)
 
+                        // 同题对照(#77 最小版):已存摘要 vs 临时配置现跑,两只读卡并排。
+                        if let record {
+                            Button {
+                                compareRecord = record
+                            } label: {
+                                Label("同题对照…", systemImage: "square.split.2x1")
+                            }
+                            .disabled(record.transcript?.isEmpty ?? true)
+                        }
+
                         if fileExists, let record {
                             miniPlayer(record)
                         }
                     }
                 }
+            }
+            .sheet(item: $compareRecord) { target in
+                CompareSheet(record: target, transcriber: transcriber)
             }
         }
     }

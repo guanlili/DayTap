@@ -344,7 +344,9 @@ struct DayView: View {
                 return "· \(entry.item.text)（\(entry.bucket == .overdue ? "已逾期" : "截止 \(due)")）"
             }
             let busyLines = calendarEvents.map { "\(Self.clock($0.startDate))–\(Self.clock($0.endDate)) \($0.title ?? "日程")" }
-            let result = await transcriber.daySuggestions(todos: todoLines, busy: busyLines)
+            // #80-P1:健康聚合量静默进排程——不弹授权,已授权才有这行;没睡够就少排硬仗。
+            let health = await HealthReader.summarize()?.headline
+            let result = await transcriber.daySuggestions(todos: todoLines, busy: busyLines, health: health)
             await MainActor.run {
                 planning = false
                 plannedOnce = true
