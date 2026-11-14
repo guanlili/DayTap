@@ -1,6 +1,8 @@
-# DayTap
+# DayTab
 
 > 腕上日录:按一下录音,回到手机时,它已经是文字、摘要和待办。
+>
+> 产品名 **DayTab**(#81 定案);仓库名与工程名沿用 DayTap,签名/安装/数据不受影响。
 
 录音像语音备忘录一样简单;录完之后,替你把收尾做完——转全文、出摘要、待办进提醒事项和日历。AI 整理是可选的:不配也能用,配上各家大模型任选。
 
@@ -8,7 +10,7 @@
 
 **[组员先读 →](docs/onboarding-teammates.md)** · [装机步骤](docs/dev-setup.md) · [只装手表](docs/teammate-watch-sideload.md)
 
-English blurb: **DayTap** — wrist-first capture → transcription, summaries & action items on iPhone. No TestFlight; sideload with Xcode.
+English blurb: **DayTab** — wrist-first capture → transcription, summaries & action items on iPhone. No TestFlight; sideload with Xcode.
 
 ---
 

@@ -65,6 +65,10 @@ struct RecordingScreen: View {
         .onAppear {
             model.onAppear()
             model.setKnockListening(true)
+            // TEMP(截图):-demoRecording 自动开录,截完删
+            if ProcessInfo.processInfo.arguments.contains("-demoRecording"), model.phase == .idle {
+                model.toggle()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

@@ -14,7 +14,9 @@ struct MainTabView: View {
 
     @ObservedObject var player: PlaybackCenter
     @ObservedObject var transcriber: TranscriptionCenter
-    @State private var tab: Tab = .plan
+    // TEMP(截图):-demoTabRecords 直落记录 tab,截完删
+    @State private var tab: Tab = ProcessInfo.processInfo.arguments.contains("-demoTabRecords")
+        ? .records : .plan
 
     var body: some View {
         TabView(selection: $tab) {

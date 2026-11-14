@@ -82,7 +82,7 @@ final class PhoneRecorder: ObservableObject {
             start()
         case .denied:
             permissionDenied = true
-            statusText = "请在 iPhone 设置里允许 DayTap 使用麦克风"
+            statusText = "请在 iPhone 设置里允许 DayTab 使用麦克风"
         case .undetermined:
             capture.requestPermission { [weak self] granted in
                 guard let self else { return }

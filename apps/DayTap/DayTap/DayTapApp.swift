@@ -9,6 +9,17 @@ final class DayTapAppDelegate: NSObject, UIApplicationDelegate {
         PhoneLink.shared.activate()
         // iCloud 备份(#56):启动即查账号拉一轮,之后库变更去抖推+回前台触发。
         CloudSync.shared.start()
+        // TEMP(截图):-demoAddReminder 写一条系统提醒事项,截完删
+        if ProcessInfo.processInfo.arguments.contains("-demoAddReminder") {
+            Task {
+                try? await SystemInterop.addToReminders(
+                    text: "补拍系统提醒事项结果页，并加入演示视频",
+                    due: Calendar.current.date(
+                        from: DateComponents(year: 2026, month: 11, day: 15, hour: 12, minute: 0)
+                    )
+                )
+            }
+        }
         DayTapLog.link.info("iPhone application launched")
         return true
     }

@@ -107,7 +107,7 @@ struct RecordingListView: View {
                     list
                 }
             }
-            .navigationTitle("DayTap")
+            .navigationTitle("DayTab")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if !activeRecords.isEmpty, !recorder.isRecording {
@@ -236,6 +236,14 @@ struct RecordingListView: View {
         }
         .sheet(isPresented: $showExport) {
             ExportSheet(records: visibleRecords, category: categoryFilter)
+        }
+        .onAppear {
+            // TEMP(截图):-demoOpenTranscript 自动打开第一条已转写录音,截完删
+            guard ProcessInfo.processInfo.arguments.contains("-demoOpenTranscript"),
+                  transcriptRecord == nil,
+                  let first = activeRecords.first(where: { $0.transcript != nil })
+            else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { transcriptRecord = first }
         }
     }
 

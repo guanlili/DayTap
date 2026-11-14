@@ -57,7 +57,7 @@ private enum ExportBuilder {
         let dateText = Date().formatted(.iso8601.year().month().day())
         let suffix = category.map { "-\($0)" } ?? ""
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DayTap-转写-\(dateText)\(suffix).\(format.fileExtension)")
+            .appendingPathComponent("DayTab-转写-\(dateText)\(suffix).\(format.fileExtension)")
         let data: Data
         switch format {
         case .json:
@@ -84,7 +84,7 @@ private enum ExportBuilder {
     static func text(records: [RecordingRecord], format: ExportFormat, content: ExportContent, category: String?) -> String {
         let markdown = format == .markdown
         let today = Date().formatted(date: .abbreviated, time: .omitted)
-        var lines: [String] = [markdown ? "# DayTap 转写 · \(today)" : "DayTap 转写 · \(today)"]
+        var lines: [String] = [markdown ? "# DayTab 转写 · \(today)" : "DayTab 转写 · \(today)"]
         if let category {
             lines.append("")
             lines.append(markdown ? "筛选类别：**\(category)**" : "筛选类别：\(category)")

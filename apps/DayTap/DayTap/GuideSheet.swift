@@ -13,7 +13,7 @@ struct GuideSheet: View {
                     guideRow(
                         icon: "applewatch",
                         title: "手表",
-                        detail: "红色大按钮开始/停止；指节敲桌面两下也能启停（DayTap 在前台时），录音中按表冠回表盘不停。录错点「丢弃待传」整条弃掉。传到 iPhone 确认后手表原件自动清除。"
+                        detail: "红色大按钮开始/停止；指节敲桌面两下也能启停（DayTab 在前台时），录音中按表冠回表盘不停。录错点「丢弃待传」整条弃掉。传到 iPhone 确认后手表原件自动清除。"
                     )
                     guideRow(
                         icon: "iphone",
@@ -49,7 +49,7 @@ struct GuideSheet: View {
                     guideRow(
                         icon: "folder",
                         title: "文件与导出",
-                        detail: "音频在「文件」App → 我的 iPhone → DayTap；⋯ 菜单「导出」把当前列表（可按类别先筛）拼成一个文件——Markdown 进语料库、纯文本直接粘贴、JSON 喂脚本，内容可选完整或仅摘要卡。"
+                        detail: "音频在「文件」App → 我的 iPhone → DayTab；⋯ 菜单「导出」把当前列表（可按类别先筛）拼成一个文件——Markdown 进语料库、纯文本直接粘贴、JSON 喂脚本，内容可选完整或仅摘要卡。"
                     )
                 }
             }
