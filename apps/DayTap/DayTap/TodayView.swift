@@ -5,6 +5,8 @@ import SwiftUI
 /// 绝不放「敬请期待」式的占位假内容,空态都说明数据从哪来、何时会有。
 struct TodayView: View {
     @ObservedObject private var library = PhoneLink.shared.library
+    /// 人物块点名字听原声(#85 v1):与各页共用同一个 PlaybackCenter。
+    @ObservedObject var player: PlaybackCenter
     // 健康回顾(#80-P1):连过/读数两态分开记——「连过但空」要说清是授权还是没记录。
     @State private var health: HealthReader.Summary?
     @State private var healthLinked = false
@@ -34,11 +36,7 @@ struct TodayView: View {
                     .padding(.horizontal)
 
                     healthBlock
-                    reviewBlock(
-                        title: "人物",
-                        icon: "person.2",
-                        text: "今天的声音里常出现谁、聊了什么,会在每日回顾里汇总。"
-                    )
+                    peopleBlock
                     reviewBlock(
                         title: "情绪",
                         icon: "face.smiling",
@@ -49,7 +47,66 @@ struct TodayView: View {
             }
             .navigationTitle("今天")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if let playingID = player.playingID,
+                   let record = library.records.first(where: { $0.id == playingID }) {
+                    PlaybackBarView(player: player, record: record)
+                }
+            }
         }
+    }
+
+    // MARK: - 人物(#85 v1)
+
+    /// 今天的声音里提到的人:digest 顺手抽取(名字按「关于我」词表的写法对齐),
+    /// 点人名播最近一条提到 TA 的录音。没提到=诚实空态。
+    private var peopleBlock: some View {
+        let mentions = DayAgenda.peopleMentions(library.records, now: Date())
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.2")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("人物")
+                        .font(.subheadline.weight(.medium))
+                    if mentions.isEmpty {
+                        Text("今天的声音里还没提到具体的人。转写整理时会把提到的人记到这里;常用称呼可在「我的 → 关于我」里定规范写法。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(mentions) { mention in
+                            Button {
+                                if let first = mention.sources.first {
+                                    player.toggle(first, fileURL: library.fileURL(id: first.id))
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(mention.name)
+                                        .font(.subheadline)
+                                    Text(mention.count == 1
+                                        ? "来自「\(mention.sources[0].title)」"
+                                        : "\(mention.count) 条录音")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("播放今天提到\(mention.name)的录音")
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .padding(.horizontal)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - 健康回顾(#80-P1 探针即首版)

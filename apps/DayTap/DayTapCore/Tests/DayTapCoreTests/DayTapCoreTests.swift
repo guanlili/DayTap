@@ -623,3 +623,42 @@ func testDayAgendaNormalizedSuggestions() {
     XCTAssertEqual(out.map { $0.kind }, expectedKinds)
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #85 people
+
+/// 今天提到的人:跨录音聚合、单条内重名不虚增、空名丢弃、只看今天未删除、按条数降序同数按名序。
+func testDayAgendaPeopleMentions() {
+    let calendar = Calendar.current
+    let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 16))!
+    let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
+    var a = Self.record(id: "a")
+    a.createdAt = now
+    a.people = ["小周", "王总", "小周", "  "]  // 单条内重复+纯空白
+    var b = Self.record(id: "b")
+    b.createdAt = now
+    b.people = ["小周"]
+    var old = Self.record(id: "old")
+    old.createdAt = yesterday
+    old.people = ["王总"]
+    var gone = Self.record(id: "gone")
+    gone.createdAt = now
+    gone.deletedAt = now
+    gone.people = ["小周"]
+    let mentions = DayAgenda.peopleMentions([a, b, old, gone], now: now)
+    XCTAssertEqual(mentions.map { $0.name }, ["小周", "王总"])
+    XCTAssertEqual(mentions[0].count, 2)
+    XCTAssertEqual(mentions[0].sources.map { $0.id }, ["a", "b"])
+    XCTAssertEqual(mentions[1].count, 1)
+}
+
+/// 老索引没有 people 字段——解码得 nil(可选字段零迁移底线)。
+func testRecordDecodesLegacyWithoutPeople() {
+    let json = """
+    {"id":"p-legacy","createdAt":"2026-11-13T08:00:00Z","durationSeconds":60,
+     "byteCount":500000,"state":"pending","updatedAt":"2026-11-13T08:01:00Z",
+     "transcript":"聊到小周","summary":"聊了排期"}
+    """
+    XCTAssertNil(CloudSyncLogic.decode(json)?.people)
+}
+}

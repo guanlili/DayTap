@@ -131,6 +131,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     /// 长录音章节(#68):分块 digest 顺带产出,短录音(单块)无章节。
     /// 可选字段,旧 index.json 解码为 nil 天然向后兼容;不参与手表传输协议。
     var chapters: [Chapter]? = nil
+    /// 这条录音里提到的人(#85 v1):digest 同一次调用顺手抽取,名字按「关于我」词表的规范写法对齐。
+    /// 可选字段,旧索引解码为 nil 天然兼容;不参与手表传输协议。
+    var people: [String]? = nil
     /// 录音来源(#3):nil=手表(旧数据天然如此),"phone"=手机直接录。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机录的永远不出本机)。
     var origin: String? = nil

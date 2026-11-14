@@ -70,6 +70,42 @@ enum DayAgenda {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// 今天的声音里提到的人(#85 v1):跨今天录音聚合,按提及条数降序;
+    /// sources 带来源录音,点了能听。只统计今天的,不看回收站。
+    struct PersonMention: Identifiable, Equatable {
+        var id: String { name }
+        var name: String
+        var count: Int
+        /// 提到这个人的今天录音(时间正序)。
+        var sources: [RecordingRecord]
+    }
+
+    static func peopleMentions(
+        _ records: [RecordingRecord],
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [PersonMention] {
+        var byName: [String: PersonMention] = [:]
+        for record in todaysRecordings(records, now: now, calendar: calendar) {
+            // 抽取侧已去重,这里再兜一道:Set 保证「N 条录音」语义不被单条内的重复名虚增。
+            for raw in Set(record.people ?? []) {
+                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { continue }
+                if var mention = byName[name] {
+                    mention.count += 1
+                    mention.sources.append(record)
+                    byName[name] = mention
+                } else {
+                    byName[name] = PersonMention(name: name, count: 1, sources: [record])
+                }
+            }
+        }
+        return byName.values.sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            return lhs.name < rhs.name
+        }
+    }
+
     // MARK: - 今日安排建议(#80 P0)
 
     /// AI 排程建议的一条:标题+理由+建议时段。kind 只作图标语义,不参与逻辑。

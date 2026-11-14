@@ -21,7 +21,7 @@ struct MainTabView: View {
             DayView(player: player, transcriber: transcriber)
                 .tabItem { Label("计划", systemImage: "checklist") }
                 .tag(Tab.plan)
-            TodayView()
+            TodayView(player: player)
                 .tabItem { Label("今天", systemImage: "sun.max") }
                 .tag(Tab.today)
             RecordingListView(player: player, transcriber: transcriber)

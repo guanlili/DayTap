@@ -63,16 +63,17 @@ final class TranscriptionCenter: ObservableObject {
         stale.autoTitle = nil
         stale.actionItems = nil
         stale.chapters = nil
+        stale.people = nil
         library.upsert(stale)
         // #67:预清先留底——转写失败时派生字段(含用户勾选态)可回滚,
         // 不停在「旧全文+无摘要+无待办」的裸态。
-        retranscribeBackup[record.id] = (record.summary, record.autoTitle, record.actionItems, record.chapters)
+        retranscribeBackup[record.id] = (record.summary, record.autoTitle, record.actionItems, record.chapters, record.people)
         transcribe(record)
     }
 
-    /// 重转预清前的派生字段快照(#67 失败回滚用;#68 起 chapters 一并留底)。
+    /// 重转预清前的派生字段快照(#67 失败回滚用;#68 起 chapters、#85 起 people 一并留底)。
     private var retranscribeBackup:
-        [String: (summary: String?, autoTitle: String?, actions: [ActionItem]?, chapters: [Chapter]?)] = [:]
+        [String: (summary: String?, autoTitle: String?, actions: [ActionItem]?, chapters: [Chapter]?, people: [String]?)] = [:]
 
     private func rollbackRetranscribe(id: String) {
         guard let backup = retranscribeBackup.removeValue(forKey: id),
@@ -82,6 +83,7 @@ final class TranscriptionCenter: ObservableObject {
         fresh.autoTitle = backup.autoTitle
         fresh.actionItems = backup.actions
         fresh.chapters = backup.chapters
+        fresh.people = backup.people
         library.upsert(fresh)
         DayTapLog.transcribe.info("retranscribe rollback \(id, privacy: .public)")
     }
@@ -265,6 +267,8 @@ final class TranscriptionCenter: ObservableObject {
             }
             // 章节(#68)同摘要/标题口径:成功即覆盖,失败(含降级短路径)清空——章节锚的是旧全文会误导跳播。
             fresh.chapters = result?.chapters
+            // 提到的人(#85 v1)同口径:失败清空,今天页人物块随之降级为空态。
+            fresh.people = result?.people
         }
         fresh.updatedAt = Date()
         retranscribeBackup.removeValue(forKey: record.id)
@@ -282,6 +286,8 @@ final class TranscriptionCenter: ObservableObject {
         var actions: [ActionItem]?
         /// 长录音章节(#68):只有分块路径产出;短录音/降级路径 nil。
         var chapters: [Chapter]? = nil
+        /// 提到的人(#85 v1):digest 同一次调用顺手抽取;失败/降级路径 nil。
+        var people: [String]? = nil
     }
 
     /// 块级摘要(#68)的规整结果:章节标题+要点+该块待办。
@@ -469,7 +475,7 @@ final class TranscriptionCenter: ObservableObject {
         }
         do {
             let reply = try await client.chat(
-                system: "你整理中文语音录音转写的一个片段,只依据片段内容作答,用简体中文,不发明片段里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:sectionTitle(该片段的主题短标题,不超过8个字,无结尾标点),keyPoints(该片段要点,不超过两句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把相对表述按输入第一行的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
+                system: "你整理中文语音录音转写的一个片段,只依据片段内容作答,用简体中文,不发明片段里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:sectionTitle(该片段的主题短标题,不超过8个字,无结尾标点),keyPoints(该片段要点,不超过两句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把相对表述按输入第一行的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组),people(人名数组,只列转写里明确提到的人,优先用背景段里给过的规范写法,没有给空数组)。",
                 user: Self.digestContext + "\n片段如下:\n" + block.text
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -526,11 +532,14 @@ final class TranscriptionCenter: ObservableObject {
             if category == nil {
                 DayTapLog.transcribe.info("digest unmatched category \(raw.category.prefix(10), privacy: .public)")
             }
+            let people = Array(Set(raw.people.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }.map { String($0.prefix(12)) })).sorted()
             return DigestResult(
                 category: category,
                 title: title.isEmpty ? nil : String(title.prefix(12)),
                 summary: summary.isEmpty ? nil : summary,
-                actions: actions.isEmpty ? nil : actions
+                actions: actions.isEmpty ? nil : actions,
+                people: people.isEmpty ? nil : people
             )
         } catch {
             DayTapLog.transcribe.info("digest failed \(error.localizedDescription, privacy: .public)")
@@ -552,10 +561,12 @@ final class TranscriptionCenter: ObservableObject {
             var summary: String?
             // #61:actionItems 兼容两种形态——新 [{text,due,direction}] 与旧裸字符串数组。
             var actionItems: [CloudAction]?
+            // #85 v1:提到的人;没抽到给 nil。
+            var people: [String]?
         }
         do {
             let reply = try await client.chat(
-                system: "你整理中文语音录音的转写全文,只依据全文内容作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
+                system: "你整理中文语音录音的转写全文,只依据全文内容作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组),people(人名数组,只列转写里明确提到的人,优先用背景段里给过的规范写法,没有给空数组)。",
                 user: Self.digestContext + "\n" + String(transcript.prefix(4000))
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -589,11 +600,14 @@ final class TranscriptionCenter: ObservableObject {
                         direction: raw.direction.flatMap(ActionDirection.init)
                     )
                 }
+            let people = Array(Set((payload.people ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }.map { String($0.prefix(12)) })).sorted()
             return DigestResult(
                 category: category,
                 title: payload.title.flatMap { $0.isEmpty ? nil : String($0.prefix(12)) },
                 summary: payload.summary.flatMap { $0.isEmpty ? nil : $0 },
-                actions: actions.isEmpty ? nil : actions
+                actions: actions.isEmpty ? nil : actions,
+                people: people.isEmpty ? nil : people
             )
         } catch let error as LLMClient.CallError {
             DayTapLog.transcribe.info("cloud digest failed \(error.message, privacy: .public)")
@@ -668,6 +682,7 @@ final class TranscriptionCenter: ObservableObject {
                     if fresh.summary == nil { fresh.summary = result.summary }
                     if fresh.actionItems == nil { fresh.actionItems = result.actions }
                     if fresh.chapters == nil { fresh.chapters = result.chapters }
+                    if fresh.people == nil { fresh.people = result.people }
                     fresh.updatedAt = Date()
                     library.upsert(fresh)
                 }
@@ -784,6 +799,8 @@ struct RecordingDigest {
     var actionDeadlines: [String]
     @Guide(description: "与 actionItems 一一对应的方向数组:\"me\"=我答应别人的,\"other\"=别人答应我的;拿不准给 \"me\"")
     var actionDirections: [String]
+    @Guide(description: "转写里明确提到的人名数组,只列真名或常用称呼,优先用背景段给过的规范写法;没提到给空列表")
+    var people: [String]
 }
 
 /// @Generable 的块级结构化输出(#68):长录音分块摘要用,一次产出 章节标题+要点+待办。
