@@ -129,6 +129,37 @@ struct TranscriptView: View {
                     Text(summary)
                         .font(.subheadline)
                 }
+                // #75 摘要回链(A):块级要点带着章节起点落库,这里整行轻点=跳到原声出处;
+                // 短路径/老数据没有 keyPoints 不渲染,纯导航仍走章节条(#68)。
+                if let chapters = record?.chapters {
+                    let anchored = chapters.filter { !($0.keyPoints ?? "").isEmpty }
+                    if !anchored.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(anchored.enumerated()), id: \.offset) { _, chapter in
+                                Button {
+                                    guard fileExists, let record else { return }
+                                    player.toggle(record, fileURL: library.fileURL(id: recordID), at: chapter.start)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "waveform")
+                                            Text("\(DayTapFormat.clock(chapter.start)) · \(chapter.title)")
+                                        }
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(Color.secondary)
+                                        Text(chapter.keyPoints ?? "")
+                                            .font(.subheadline)
+                                            .foregroundStyle(Color.primary)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("跳到「\(chapter.title)」的要点出处,\(Int(chapter.start)) 秒处")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 if let actions = record?.actionItems, !actions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         // #70:混有「别人答应的」才分组带头标,纯行动项保持原样不加噪音。

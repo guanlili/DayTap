@@ -101,10 +101,14 @@ struct TranscriptSegment: Codable, Equatable {
 }
 
 /// 长录音章节(#68):分块 digest 时由块级摘要产出(块主题短标题+块起点),点章跳播。
+/// #75 摘要回链(A):块级要点一并落库——keyPoints 带着章节起点,就是天然的回链锚点;
+/// 老索引没有这个字段,解码得 nil(可选字段零迁移的既定底线)。
 struct Chapter: Codable, Equatable {
     var title: String
     /// 距录音开始的秒数,取块内首段的 start。
     var start: Double
+    /// 该块要点(不超过两句,块级 digest 原文);短路径/老数据为 nil。
+    var keyPoints: String? = nil
 }
 
 /// 手表和 iPhone 共用的一条录音索引。文件名永远由 `id` 推导，不采用对方传来的路径。

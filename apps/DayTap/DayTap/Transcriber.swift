@@ -390,8 +390,14 @@ final class TranscriptionCenter: ObservableObject {
             parts.append("以上各片段提到的待办候选:\n" + actionLines.joined(separator: "\n"))
         }
         guard var merged = await digest(transcript: parts.joined(separator: "\n")) else { return nil }
+        // #75 摘要回链(A):块级 keyPoints 随章节落库,要点=回链锚点(本机/云端两引擎共用此合并点)。
         merged.chapters = zip(blocks, chunks).map {
-            Chapter(title: String($1.sectionTitle.prefix(8)), start: $0.start)
+            let trimmed = $1.keyPoints.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Chapter(
+                title: String($1.sectionTitle.prefix(8)),
+                start: $0.start,
+                keyPoints: trimmed.isEmpty ? nil : trimmed
+            )
         }
         return merged
     }

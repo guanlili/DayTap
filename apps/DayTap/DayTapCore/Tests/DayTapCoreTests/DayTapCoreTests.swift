@@ -499,3 +499,31 @@ func testActionItemAnchorPrefersEarlierSegmentOnTie() {
     XCTAssertEqual(ActionItemAnchor.offset(for: "周五再说", segments: segments), 0)
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #75 Chapter.keyPoints 落库
+
+/// 老索引的 chapters 没有 keyPoints 字段——解码必须得 nil(可选字段零迁移的既定底线)。
+func testChapterDecodesLegacyWithoutKeyPoints() {
+    let json = """
+    {"id":"ch-legacy","createdAt":"2026-11-13T08:00:00Z","durationSeconds":1900,
+     "byteCount":9000000,"state":"pending","updatedAt":"2026-11-13T08:31:00Z",
+     "chapters":[{"title":"青云项目","start":0},{"title":"待办收尾","start":960}]}
+    """
+    let record = CloudSyncLogic.decode(json)
+    XCTAssertEqual(record?.chapters?.count, 2)
+    XCTAssertNil(record?.chapters?.first?.keyPoints)
+}
+
+/// 带要点的章节编解码往返——回链锚点链路要保真。
+func testChapterKeyPointsRoundTrip() {
+    var record = Self.record(id: "ch-rt")
+    record.chapters = [
+        Chapter(title: "青云项目", start: 120, keyPoints: "对齐了二期排期,风险在小周那边"),
+        Chapter(title: "散会", start: 900, keyPoints: nil),
+    ]
+    let decoded = CloudSyncLogic.decode(CloudSyncLogic.encode(record)!)
+    XCTAssertEqual(decoded?.chapters?.first?.keyPoints, "对齐了二期排期,风险在小周那边")
+    XCTAssertNil(decoded?.chapters?.last?.keyPoints)
+}
+}
