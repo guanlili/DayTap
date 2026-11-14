@@ -167,6 +167,15 @@ final class DayTapCoreTests: XCTestCase {
         XCTAssertTrue(LLMProviderID.openai.presetBaseURL.contains("openai.com"))
     }
 
+    /// 「关于我」(#71):默认空;存取走 trim,空串语义=未填(注入侧据此跳过)。
+    func testAboutMeRoundTrip() {
+        let defaults = UserDefaults.standard
+        defer { defaults.removeObject(forKey: LLMSettings.aboutMeKey) }
+        XCTAssertEqual(LLMSettings.aboutMe, "")
+        defaults.set("  同事小周、青云项目  \n", forKey: LLMSettings.aboutMeKey)
+        XCTAssertEqual(LLMSettings.aboutMe, "同事小周、青云项目")
+    }
+
     // MARK: - 工具
 
     private static func record(

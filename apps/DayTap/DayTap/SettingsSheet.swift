@@ -16,6 +16,7 @@ struct SettingsSheet: View {
     @State private var modelSelection: String
     @State private var customModel: String
     @State private var apiKey: String
+    @State private var aboutMe: String
     @State private var testResult: (ok: Bool, message: String)?
     @State private var testing = false
 
@@ -37,6 +38,7 @@ struct SettingsSheet: View {
             _customModel = State(initialValue: savedModel)
         }
         _apiKey = State(initialValue: LLMSecrets.loadKey() ?? "")
+        _aboutMe = State(initialValue: LLMSettings.aboutMe)
     }
 
     var body: some View {
@@ -112,6 +114,19 @@ struct SettingsSheet: View {
                         }
                     } footer: {
                         Text("模型候选只是起点，各家上新快，以控制台为准，选「自定义…」可填任意型号。")
+                    }
+
+                    // 「关于我」(#71):可选背景段,拼进 digest prompt 纠人名/术语——
+                    // 占位示例即格式说明,能选不填,留空行为不变。
+                    Section {
+                        TextField("例：同事小周、青云项目、行业词「私域复购」…", text: $aboutMe, axis: .vertical)
+                            .lineLimit(1...4)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("daytap.llm.aboutMe")
+                    } header: {
+                        Text("关于我")
+                    } footer: {
+                        Text("常提到的人名、项目名与术语的规范写法。整理摘要时会随转写文字一并发给所配服务，帮模型写对专有名词；留空不发送。")
                     }
 
                     Section {
@@ -207,6 +222,7 @@ struct SettingsSheet: View {
         defaults.set(provider.rawValue, forKey: LLMSettings.providerKey)
         defaults.set(customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: LLMSettings.customBaseURLKey)
         defaults.set(model.trimmingCharacters(in: .whitespacesAndNewlines), forKey: LLMSettings.modelKey)
+        defaults.set(aboutMe.trimmingCharacters(in: .whitespacesAndNewlines), forKey: LLMSettings.aboutMeKey)
         LLMSecrets.saveKey(apiKey)
     }
 }

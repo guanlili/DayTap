@@ -59,6 +59,15 @@ enum LLMSettings {
 
     static var enabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
 
+    /// 「关于我」(#71):常提到的人名/项目/术语,两条 digest 路径拼进 prompt 纠专名。
+    /// 属 prompt 输入而非接口配置,随 LLM 设置一起存取;可选,空=行为不变。
+    static let aboutMeKey = "llm.aboutMe"
+
+    static var aboutMe: String {
+        (UserDefaults.standard.string(forKey: aboutMeKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static var provider: LLMProviderID {
         LLMProviderID(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "") ?? .zhipu
     }

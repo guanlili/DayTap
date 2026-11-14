@@ -287,6 +287,15 @@ final class TranscriptionCenter: ObservableObject {
         return "今天是\(formatter.string(from: Date()))。"
     }
 
+    /// digest 输入的公共前缀(#71):今天日期仍居第一行——云端 prompt 明说「按输入第一行的今天换算」;
+    /// 「关于我」可选跟在其后,给模型人名/术语的写法线索(不是待整理内容)。留空行为不变,
+    /// 注入侧限长 400 字,防一句背景把本就紧张的摘要输入挤得更短。
+    static var digestContext: String {
+        let about = LLMSettings.aboutMe
+        guard !about.isEmpty else { return todayContext }
+        return todayContext + "\n关于我的背景(只用于理解转写内容与专有名词写法):\n" + String(about.prefix(400))
+    }
+
     /// 三级瀑布(#39):本机 Foundation Models(可用必优先)→ 云端(已配置)→ 留空+状态卡说明。
     /// 国行 iPhone 无 Apple 智能,云端是主力用户实际吃到摘要卡的路径。
     private func digest(transcript: String) async -> DigestResult? {
@@ -320,7 +329,7 @@ final class TranscriptionCenter: ObservableObject {
         )
         do {
             let response = try await session.respond(
-                to: Self.todayContext + "\n转写全文如下:\n\(String(transcript.prefix(4000)))",
+                to: Self.digestContext + "\n转写全文如下:\n\(String(transcript.prefix(4000)))",
                 generating: RecordingDigest.self
             )
             let raw = response.content
@@ -356,7 +365,7 @@ final class TranscriptionCenter: ObservableObject {
         }
     }
 
-    /// 云端出摘要(#39→#42 走 LLMClient):转写前 4000 字发送到所配服务,隐私在设置页明示。
+    /// 云端出摘要(#39→#42 走 LLMClient):转写前 4000 字(+#71「关于我」若填)发送到所配服务,隐私在设置页明示。
     private func cloudDigest(transcript: String) async -> DigestResult? {
         guard let client = LLMClient() else {
             statusText = "AI 模型配置无效（服务商 / 模型 / API Key），转写不受影响"
@@ -390,7 +399,7 @@ final class TranscriptionCenter: ObservableObject {
         do {
             let reply = try await client.chat(
                 system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
-                user: Self.todayContext + "\n" + String(transcript.prefix(4000))
+                user: Self.digestContext + "\n" + String(transcript.prefix(4000))
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
             // 宽容解析:截第一个 { 到最后一个 },容忍模型带代码围栏或前后废话。
