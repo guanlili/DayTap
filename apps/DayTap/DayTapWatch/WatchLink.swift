@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import WatchConnectivity
+import WidgetKit
 
 /// 一次重传的口径结果,给「再传一次」做明确反馈(#4):点了之后到底发生了什么。
 struct RetryResult {
@@ -335,6 +336,16 @@ extension WatchLink: WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        // #80-P2 计划磁贴:手机推「今日待办数」——写表侧共享容器并刷磁贴,与回执通道并流。
+        if (userInfo[TransferKeys.kind] as? String) == "plan" {
+            let count = userInfo["count"] as? Int ?? 0
+            let day = userInfo["day"] as? String ?? ""
+            let shared = UserDefaults(suiteName: "group.com.guanhongli.daytap")
+            shared?.set(count, forKey: "plan.todoCount")
+            shared?.set(day, forKey: "plan.day")
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
         guard (userInfo[TransferKeys.kind] as? String) == TransferKeys.kindAck,
               let id = userInfo[TransferKeys.id] as? String else {
             return

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- #80-P2 手表计划磁贴:手表 App 写、表上小组件读,同设备共享容器。 -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.guanhongli.daytap</string>
+	</array>
+</dict>
+</plist>

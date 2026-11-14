@@ -18,6 +18,9 @@ final class PhoneLink: NSObject, ObservableObject {
     /// 索引放在 Application Support，不出现在文件 App 里。
     let library: RecordingLibrary
 
+    // #80-P2 计划磁贴:库变化→防抖推今日待办数给手表。
+    private var planCancellable: AnyCancellable?
+
     @Published private(set) var status = "等手表把录音传过来"
     @Published private(set) var sessionReady = false
 
@@ -163,6 +166,8 @@ final class PhoneLink: NSObject, ObservableObject {
             publish(status: readyStatus(session), ready: true)
         }
         DayTapLog.link.info("iPhone WCSession activate requested")
+        // #80-P2 计划磁贴:启动即推一次,库有变化(转写出新待办/勾掉一件)再防抖补推。
+        startPlanSync()
     }
 
     /// 分享时复制一份带名字的文件名，避免得到里只看到一长串 UUID。起了名跟名字走(#2)。
@@ -207,6 +212,36 @@ final class PhoneLink: NSObject, ObservableObject {
 }
 
 extension PhoneLink: WCSessionDelegate {
+    // MARK: - #80-P2 计划磁贴:今日待办数推手表
+
+    private func startPlanSync() {
+        guard planCancellable == nil else { return }
+        planCancellable = library.$records
+            .dropFirst()
+            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.pushPlanSummary() }
+        pushPlanSummary()
+    }
+
+    /// 今日待办数(今天到期+逾期未完成)推手表 App——表侧写共享容器,计划磁贴读。
+    /// transferUserInfo 离线排队,手表回魂自动补送;带「天」防隔夜旧数。
+    private func pushPlanSummary() {
+        guard WCSession.default.activationState == .activated else { return }
+        let count = DayAgenda.todayTodos(library.records, now: Date()).count
+        WCSession.default.transferUserInfo([
+            TransferKeys.kind: "plan",
+            "count": count,
+            "day": Self.planDayFormatter.string(from: Date()),
+        ])
+    }
+
+    private static let planDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
