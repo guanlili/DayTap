@@ -17,10 +17,14 @@ final class DayTapAppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct DayTapApp: App {
     @UIApplicationDelegateAdaptor(DayTapAppDelegate.self) private var appDelegate
+    // #80 双 tab:播放器与转写中心提到 App 级共享——Day 页跳播/排程与录音页
+    // 看到的是同一个实例,播放态与转写队列不因切 tab 分叉。
+    @StateObject private var player = PlaybackCenter()
+    @StateObject private var transcriber = TranscriptionCenter(library: PhoneLink.shared.library)
 
     var body: some Scene {
         WindowGroup {
-            RecordingListView()
+            MainTabView(player: player, transcriber: transcriber)
         }
     }
 }

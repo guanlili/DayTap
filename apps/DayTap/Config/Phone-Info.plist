@@ -39,6 +39,8 @@
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>$(IPHONEOS_DEPLOYMENT_TARGET)</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>在 Day 页的时间线里展示今天已有的日历日程时使用，只读不写。</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>把带截止时间的待办添加到日历时使用，只在你确认后写入。</string>
 	<key>NSMicrophoneUsageDescription</key>

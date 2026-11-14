@@ -14,10 +14,17 @@ import UniformTypeIdentifiers
 struct RecordingListView: View {
     @ObservedObject private var link = PhoneLink.shared
     @ObservedObject private var library = PhoneLink.shared.library
-    @StateObject private var player = PlaybackCenter()
-    @StateObject private var transcriber = TranscriptionCenter(library: PhoneLink.shared.library)
+    // #80 双 tab:播放器/转写中心升到 App 级共享,本视图只观察不持有——
+    // Day 页跳播/排程与这里看到的是同一实例,播放态不因切 tab 分叉。
+    @ObservedObject private var player: PlaybackCenter
+    @ObservedObject private var transcriber: TranscriptionCenter
     @StateObject private var recorder = PhoneRecorder()
     @Environment(\.scenePhase) private var scenePhase
+
+    init(player: PlaybackCenter, transcriber: TranscriptionCenter) {
+        self.player = player
+        self.transcriber = transcriber
+    }
 
     @State private var exportURL: URL?
     @State private var exportName = "DayTap.m4a"
@@ -1006,7 +1013,8 @@ struct RecordingListView: View {
 
 /// 行内播放条(#63 独立观察):整条下沉成子视图,自己观察 clock——
 /// 4Hz 只重画这一小条,列表主体不再随 tick 全量重算。
-private struct PlaybackBarView: View {
+/// #80 起 Day 页跳播也用它,摘 internal。
+struct PlaybackBarView: View {
     @ObservedObject var player: PlaybackCenter
     @ObservedObject private var clock: PlaybackCenter.Clock
     let record: RecordingRecord

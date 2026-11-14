@@ -527,3 +527,99 @@ func testChapterKeyPointsRoundTrip() {
     XCTAssertNil(decoded?.chapters?.last?.keyPoints)
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #80 DayAgenda
+
+private static func todoRecord(
+    id: String,
+    created: Date,
+    items: [ActionItem],
+    deleted: Bool = false
+) -> RecordingRecord {
+    var record = Self.record(id: id)
+    record.createdAt = created
+    record.actionItems = items
+    if deleted { record.deletedAt = created }
+    return record
+}
+
+/// 今日待办聚合口径:今天到期+全部逾期的未完成;已完成/无截止/明天以后/回收站都不进;
+/// 排序逾期在前、同桶按截止时刻。
+func testDayAgendaTodayTodosBucketsAndOrder() {
+    let calendar = Calendar.current
+    let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 12))!
+    let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
+    let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+    let earlier = calendar.date(byAdding: .hour, value: -12, to: now)!
+    let records = [
+        Self.todoRecord(
+            id: "r1", created: yesterday,
+            items: [
+                ActionItem(text: "今天上午回消息", dueAt: calendar.date(byAdding: .hour, value: -2, to: now)),
+                ActionItem(text: "昨晚就该发的周报", dueAt: yesterday),
+                ActionItem(text: "已办掉的逾期项", isDone: true, dueAt: yesterday),
+                ActionItem(text: "没截止的念想", dueAt: nil),
+                ActionItem(text: "明天的会", dueAt: tomorrow),
+            ]
+        ),
+        Self.todoRecord(
+            id: "r2", created: earlier,
+            items: [ActionItem(text: "拖了三天的预算", dueAt: calendar.date(byAdding: .day, value: -3, to: now))]
+        ),
+        Self.todoRecord(id: "r3", created: earlier, items: [ActionItem(text: "回收站里的", dueAt: now)], deleted: true),
+    ]
+    let todos = DayAgenda.todayTodos(records, now: now)
+    // 逾期在前且最久的排最前,今天的殿后;完成/无截止/明天/删除全排除。
+    XCTAssertEqual(todos.map { $0.item.text }, ["拖了三天的预算", "昨晚就该发的周报", "今天上午回消息"])
+    let expectedBuckets: [DayAgenda.TodoEntry.Bucket] = [.overdue, .overdue, .today]
+    XCTAssertEqual(todos.map { $0.bucket }, expectedBuckets)
+    // 复合键防跨录音同文撞 id。
+    XCTAssertEqual(Set(todos.map { $0.id }).count, todos.count)
+}
+
+/// 跨录音同文待办不互吞:两条「回消息」各自成行。
+func testDayAgendaDuplicateTextAcrossRecordsKept() {
+    let calendar = Calendar.current
+    let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 9))!
+    let records = [
+        Self.todoRecord(id: "a", created: now, items: [ActionItem(text: "回消息", dueAt: now)]),
+        Self.todoRecord(id: "b", created: now, items: [ActionItem(text: "回消息", dueAt: now)]),
+    ]
+    XCTAssertEqual(DayAgenda.todayTodos(records, now: now).count, 2)
+}
+
+/// 今天录的:未删除、今天创建、按时间正序;昨天的与回收站的不进。
+func testDayAgendaTodaysRecordings() {
+    let calendar = Calendar.current
+    let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 15))!
+    let morning = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 8))!
+    let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
+    let records = [
+        Self.todoRecord(id: "r2", created: now, items: []),
+        Self.todoRecord(id: "r1", created: morning, items: []),
+        Self.todoRecord(id: "old", created: yesterday, items: []),
+        Self.todoRecord(id: "gone", created: morning, items: [], deleted: true),
+    ]
+    XCTAssertEqual(DayAgenda.todaysRecordings(records, now: now).map { $0.id }, ["r1", "r2"])
+}
+
+/// 建议规整:空标题先丢再配对(防左移)、截 4 条、时长钳制、未知类型归 other。
+func testDayAgendaNormalizedSuggestions() {
+    let out = DayAgenda.normalizedSuggestions(
+        titles: ["慢跑", "", "深度工作", "午休", "复盘", "第五条"],
+        reasons: ["提高心肺", "理由2", "理由3", "理由4", "理由5", "理由6"],
+        starts: ["07:30", "09:00", "13:00", "18:00", "21:00", "23:00"],
+        minutes: [30, 60, 600, -5, 45, 60],
+        kinds: ["运动", "专注", "休息", "复盘", "不认识的", "运动"]
+    )
+    // 空标题丢弃,其余按原索引配对(不左移);最多 4 条。
+    XCTAssertEqual(out.map { $0.title }, ["慢跑", "深度工作", "午休", "复盘"])
+    // #62 教训:丢空后配对不左移——「深度工作」的理由是 reasons[2] 而非「理由2」。
+    XCTAssertEqual(out[1].reason, "理由3")
+    // 时长钳到 15…240。
+    XCTAssertEqual(out.map { $0.minutes }, [30, 240, 15, 45])
+    let expectedKinds: [DayAgenda.Suggestion.Kind] = [.workout, .rest, .review, .other]
+    XCTAssertEqual(out.map { $0.kind }, expectedKinds)
+}
+}

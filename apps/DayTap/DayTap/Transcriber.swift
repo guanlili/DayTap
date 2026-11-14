@@ -677,6 +677,95 @@ final class TranscriptionCenter: ObservableObject {
             statusText = "补生成完成：\(backfillDone) 条"
         }
     }
+
+    // MARK: - Day 页今日安排(#80 P0)
+
+    /// 排程入口(#80):输入=今天的待办与日历忙段;引擎同摘要三级瀑布(本机优先→云端兜底→nil)。
+    /// 失败不置 statusText——排程是用户主动按的,结果空由 Day 页自己说话,不混进转写状态流。
+    func daySuggestions(todos: [String], busy: [String]) async -> [DayAgenda.Suggestion]? {
+        let todoBlock = todos.isEmpty ? "（无）" : todos.joined(separator: "\n")
+        let busyBlock = busy.isEmpty ? "（无）" : busy.joined(separator: "\n")
+        let user = Self.digestContext
+            + "\n今天的待办:\n" + todoBlock
+            + "\n今天日历已占用的时段:\n" + busyBlock
+            + "\n现在是" + nowLine() + "。请给今天剩余时间 2–4 条安排建议。"
+        let model = SystemLanguageModel.default
+        if model.isAvailable, let list = await onDeviceDayPlan(user: user, model: model) {
+            return list
+        }
+        if LLMSettings.isConfigured, let list = await cloudDayPlan(user: user) {
+            return list
+        }
+        DayTapLog.transcribe.info("day plan unavailable: on-device=\(model.isAvailable), cloud=\(LLMSettings.isConfigured)")
+        return nil
+    }
+
+    /// 「现在是 HH:mm」——排程要知道还剩多少白天;时区跟设备。
+    private func nowLine() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: Date())
+    }
+
+    private func onDeviceDayPlan(user: String, model: SystemLanguageModel) async -> [DayAgenda.Suggestion]? {
+        let session = LanguageModelSession(
+            model: model,
+            instructions: "你帮人安排今天剩余的时间,只依据给出的待办与占用时段,用简体中文,不发明没给过的信息。"
+        )
+        do {
+            let response = try await session.respond(to: user, generating: DayPlan.self)
+            let raw = response.content
+            return DayAgenda.normalizedSuggestions(
+                titles: raw.titles, reasons: raw.reasons, starts: raw.starts,
+                minutes: raw.minutes, kinds: raw.kinds
+            )
+        } catch {
+            DayTapLog.transcribe.info("day plan on-device failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// 云端排程(#80):与 cloudDigest 同一套宽容 JSON 解析。
+    private func cloudDayPlan(user: String) async -> [DayAgenda.Suggestion]? {
+        guard let client = LLMClient() else { return nil }
+        struct PlanPayload: Decodable {
+            struct Item: Decodable {
+                var title: String?
+                var reason: String?
+                var start: String?
+                var minutes: Int?
+                var kind: String?
+            }
+            var suggestions: [Item]?
+        }
+        do {
+            let reply = try await client.chat(
+                system: "你帮人安排今天剩余的时间,只依据给出的待办与占用时段,用简体中文,不发明没给过的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:suggestions(对象数组,每项 {title:安排标题,不超过12字,无结尾标点, reason:一句话理由, start:建议开始时刻 24小时制 HH:mm, minutes:建议时长分钟数, kind:运动/专注/休息/复盘 之一}),给 2 到 4 条。",
+                user: user
+            )
+            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
+                DayTapLog.transcribe.info("day plan cloud no json in reply")
+                return nil
+            }
+            guard let payload = try? JSONDecoder().decode(PlanPayload.self, from: Data(text[start...end].utf8)) else {
+                DayTapLog.transcribe.info("day plan cloud bad json head=\(text[start...].prefix(200), privacy: .public)")
+                return nil
+            }
+            let items = payload.suggestions ?? []
+            return DayAgenda.normalizedSuggestions(
+                titles: items.map { $0.title ?? "" },
+                reasons: items.map { $0.reason ?? "" },
+                starts: items.map { $0.start ?? "" },
+                minutes: items.map { $0.minutes ?? 30 },
+                kinds: items.map { $0.kind ?? "" }
+            )
+        } catch {
+            DayTapLog.transcribe.info("day plan cloud failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
 }
 
 /// @Generable 的结构化输出(#35/#36/#29):一次模型调用产出 类别+短标题+摘要+待办。
@@ -710,6 +799,22 @@ struct ChunkDigest {
     var actionDeadlines: [String]
     @Guide(description: "与 actionItems 一一对应的方向数组:\"me\"=我答应别人的,\"other\"=别人答应我的;拿不准给 \"me\"")
     var actionDirections: [String]
+}
+
+/// @Generable 的排程结构化输出(#80):平行数组口径与 #35 同款(嵌套结构体不赌宏的边角),
+/// 配对与钳制在 DayAgenda.normalizedSuggestions,空标题先丢防左移(#62)。
+@Generable
+struct DayPlan {
+    @Guide(description: "每条安排的标题,不超过12个字,无结尾标点")
+    var titles: [String]
+    @Guide(description: "与 titles 一一对应的理由,每条一句话")
+    var reasons: [String]
+    @Guide(description: "与 titles 一一对应的建议开始时刻,24小时制 HH:mm")
+    var starts: [String]
+    @Guide(description: "与 titles 一一对应的建议时长,分钟数")
+    var minutes: [Int]
+    @Guide(description: "与 titles 一一对应的类型:运动、专注、休息、复盘 之一")
+    var kinds: [String]
 }
 
 /// 云端 actionItems 的宽容解码(#61→#70):兼容旧裸串、新 {text,due,direction};
