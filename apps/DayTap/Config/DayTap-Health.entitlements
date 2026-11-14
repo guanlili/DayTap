@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- #80-P1 健康数据探针:只含 HealthKit,不碰 iCloud(iCloud entitlements 在
+	     DayTap/DayTap.entitlements 里泊车中,免费签名带不动,#56)。 -->
+	<key>com.apple.developer.healthkit</key>
+	<true/>
+</dict>
+</plist>
