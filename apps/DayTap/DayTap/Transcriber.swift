@@ -304,8 +304,12 @@ final class TranscriptionCenter: ObservableObject {
     /// digest 输入的公共前缀(#71):今天日期仍居第一行——云端 prompt 明说「按输入第一行的今天换算」;
     /// 「关于我」可选跟在其后,给模型人名/术语的写法线索(不是待整理内容)。留空行为不变,
     /// 注入侧限长 400 字,防一句背景把本就紧张的摘要输入挤得更短。
-    static var digestContext: String {
-        let about = LLMSettings.aboutMe
+    static var digestContext: String { digestContext(about: LLMSettings.aboutMe) }
+
+    /// #76:预览与实发共用同一拼接点——设置页传草稿值实时预览,发送路径读已存值;
+    /// trim 与 400 字截断都在这,两条路永不漂移。
+    static func digestContext(about raw: String) -> String {
+        let about = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !about.isEmpty else { return todayContext }
         return todayContext + "\n关于我的背景(只用于理解转写内容与专有名词写法):\n" + String(about.prefix(400))
     }

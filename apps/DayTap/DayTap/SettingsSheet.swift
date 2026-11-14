@@ -17,6 +17,7 @@ struct SettingsSheet: View {
     @State private var customModel: String
     @State private var apiKey: String
     @State private var aboutMe: String
+    @State private var showContextPreview = false
     @State private var testResult: (ok: Bool, message: String)?
     @State private var testing = false
 
@@ -118,11 +119,30 @@ struct SettingsSheet: View {
 
                     // 「关于我」(#71):可选背景段,拼进 digest prompt 纠人名/术语——
                     // 占位示例即格式说明,能选不填,留空行为不变。
+                    // #76 预览:所见即所发——与发送路径共用 digestContext(about:),草稿值实时预览。
                     Section {
                         TextField("例：同事小周、青云项目、行业词「私域复购」…", text: $aboutMe, axis: .vertical)
                             .lineLimit(1...4)
                             .autocorrectionDisabled()
                             .accessibilityIdentifier("daytap.llm.aboutMe")
+
+                        DisclosureGroup(isExpanded: $showContextPreview) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(TranscriptionCenter.digestContext(about: aboutMe))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                Text("今天日期行每天自动更新；长录音分段时，每段开头都会带这段内容；超过 400 字按前 400 字发送。")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
+                        } label: {
+                            Text("预览随转写一并发送的内容")
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("daytap.llm.contextPreview")
                     } header: {
                         Text("关于我")
                     } footer: {
