@@ -17,17 +17,6 @@ struct TranscriptView: View {
     /// 高频走钟(#63):跟读滚动与迷你条观察 clock,不牵动观察 player 的整屏。
     @ObservedObject var clock: PlaybackCenter.Clock
 
-    /// 完成态落库(#61/#62):手动勾选写回索引;重新转写会整体重算待办(勾选重置),类别纠偏保留。
-    private func toggleDone(_ updated: ActionItem) {
-        guard var fresh = library.record(id: recordID),
-              var items = fresh.actionItems,
-              let index = items.firstIndex(where: { $0.id == updated.id })
-        else { return }
-        items[index] = updated
-        fresh.actionItems = items
-        fresh.updatedAt = Date()  // 勾选也是变更(#62):CloudSync 增量按 updatedAt 判脏
-        library.upsert(fresh)
-    }
 
     /// #75 待办回链:分段里找得到锚点才给「跳到出处」;跳播与点句跳播同一通道,
     /// 正在播这条时原地 seek,没播则从锚点起播。
@@ -189,7 +178,7 @@ struct TranscriptView: View {
                                 ActionItemRow(
                                     item: item,
                                     sourceTitle: record?.title ?? recordID,
-                                    onToggleDone: { toggleDone($0) },
+                                    onToggleDone: { library.toggleActionItem(recordID: recordID, updated: $0) },
                                     onJumpToSource: jumpToSource(for: item),
                                     feedback: $actionFeedback
                                 )

@@ -300,12 +300,17 @@ final class TranscriptionCenter: ObservableObject {
     /// 「今天」上下文(#61 修正):转写正文里通常没有日期,模型只能瞎猜基准日——
     /// 「周五」换算错全因于此。两个引擎的输入第一行都注入今天日期+星期。
     static var todayContext: String {
+        "今天是\(todayFormatter.string(from: Date()))。"
+    }
+
+    /// 日期行只缓存一枚(#80 起排程/预览/digest 高频走 todayContext,不再每次新建)。
+    private static let todayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy年M月d日 EEEE"
-        return "今天是\(formatter.string(from: Date()))。"
-    }
+        return formatter
+    }()
 
     /// digest 输入的公共前缀(#71):今天日期仍居第一行——云端 prompt 明说「按输入第一行的今天换算」;
     /// 「关于我」可选跟在其后,给模型人名/术语的写法线索(不是待整理内容)。留空行为不变,
@@ -828,11 +833,15 @@ final class TranscriptionCenter: ObservableObject {
     }
 
     /// 「现在是 HH:mm」——排程要知道还剩多少白天;时区跟设备。
-    private func nowLine() -> String {
+    private static let nowTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: Date())
+        return formatter
+    }()
+
+    private func nowLine() -> String {
+        Self.nowTimeFormatter.string(from: Date())
     }
 
     private func onDeviceDayPlan(user: String, model: SystemLanguageModel) async -> [DayAgenda.Suggestion]? {

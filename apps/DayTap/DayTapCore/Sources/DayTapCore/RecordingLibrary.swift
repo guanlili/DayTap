@@ -51,6 +51,19 @@ final class RecordingLibrary: ObservableObject {
 
     /// 返回 false=索引落盘失败(磁盘满等),调用方据此不回执(#59:手表保留原件而非删)。
     @discardableResult
+    /// 勾选落库(#61/#62/#80 收敛):按 id 在该条录音的待办里替换并触脏。
+    /// 计划页/全文页共用这一份,不再各留拷贝;找不到(已删/待办没了)静默不动。
+    func toggleActionItem(recordID: String, updated: ActionItem) {
+        guard var fresh = record(id: recordID),
+              var items = fresh.actionItems,
+              let index = items.firstIndex(where: { $0.id == updated.id })
+        else { return }
+        items[index] = updated
+        fresh.actionItems = items
+        fresh.updatedAt = Date()  // 勾选也是变更(#62):CloudSync 增量按 updatedAt 判脏
+        upsert(fresh)
+    }
+
     func upsert(_ record: RecordingRecord) -> Bool {
         mutate { records in
             if let index = records.firstIndex(where: { $0.id == record.id }) {

@@ -739,3 +739,32 @@ func testAffairClusterOrderAndCap() {
 }
 
 }
+
+extension DayTapCoreTests {
+// MARK: - #58 空间护栏 / #80 勾选收敛
+
+func testDiskGuardThreshold() {
+    XCTAssertFalse(DiskGuard.tooLow(freeBytes: DiskGuard.minimumFreeBytes))
+    XCTAssertTrue(DiskGuard.tooLow(freeBytes: DiskGuard.minimumFreeBytes - 1))
+    // 探针读不出容量:不拦——护栏失灵不能挡正常录音。
+    XCTAssertFalse(DiskGuard.tooLow(freeBytes: nil))
+}
+
+/// 勾选落库收敛版(#61→#80):落盘可见、触脏,找不到的静默不动。
+func testToggleActionItemPersists() {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let library = RecordingLibrary(
+        audioDirectory: dir.appendingPathComponent("audio"),
+        indexURL: dir.appendingPathComponent("index.json")
+    )
+    var record = Self.record(id: "toggle-1")
+    record.actionItems = [ActionItem(text: "回消息")]
+    library.upsert(record)
+    library.toggleActionItem(recordID: "toggle-1", updated: ActionItem(text: "回消息", isDone: true))
+    let after = library.record(id: "toggle-1")
+    XCTAssertEqual(after?.actionItems?.first?.isDone, true)
+    XCTAssertNotNil(after?.updatedAt)
+    // 不存在的录音:静默不崩。
+    library.toggleActionItem(recordID: "nope", updated: ActionItem(text: "x"))
+}
+}

@@ -184,6 +184,16 @@ final class WatchModel: ObservableObject {
     // MARK: - 手动录音
 
     private func begin() {
+        // #58 空间护栏:可用空间不足拒录——写坏事件假说之一是存储临界,宁可拒录不产坏件。
+        // watchOS 无 ImportantUsage 变体,用基础可用容量键。
+        let free = (try? link.library.audioDirectory.resourceValues(
+            forKeys: [.volumeAvailableCapacityKey]
+        ))?.volumeAvailableCapacity
+        if DiskGuard.tooLow(freeBytes: free.map(Int64.init)) {
+            status = "手表空间不足,清理后再录"
+            WKInterfaceDevice.current().play(.failure)
+            return
+        }
         let start = { [weak self] in
             guard let self else { return }
             let id = UUID().uuidString

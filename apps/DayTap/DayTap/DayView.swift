@@ -106,7 +106,7 @@ struct DayView: View {
                     ActionItemRow(
                         item: entry.item,
                         sourceTitle: entry.recordTitle,
-                        onToggleDone: { toggleDone(entry.recordID, $0) },
+                        onToggleDone: { library.toggleActionItem(recordID: entry.recordID, updated: $0) },
                         onJumpToSource: jumpToSource(entry),
                         feedback: $todoFeedback
                     )
@@ -121,17 +121,6 @@ struct DayView: View {
         .padding(.horizontal)
     }
 
-    /// 完成态落库:与 TranscriptView/ReviewSheet 同一写法,勾完三处同步。
-    private func toggleDone(_ recordID: String, _ updated: ActionItem) {
-        guard var fresh = library.record(id: recordID),
-              var items = fresh.actionItems,
-              let index = items.firstIndex(where: { $0.id == updated.id })
-        else { return }
-        items[index] = updated
-        fresh.actionItems = items
-        fresh.updatedAt = Date()
-        library.upsert(fresh)
-    }
 
     /// 待办回链(#75 基建复用):锚点找到才给入口,跳播走共享播放器。
     private func jumpToSource(_ entry: DayAgenda.TodoEntry) -> (() -> Void)? {
