@@ -6,7 +6,6 @@ import SwiftUI
 struct SettingsSheet: View {
     @ObservedObject var transcriber: TranscriptionCenter
     @ObservedObject private var cloudSync = CloudSync.shared
-    @Environment(\.dismiss) private var dismiss
 
     @State private var llmEnabled: Bool
     @State private var cloudEnabled = CloudSyncSettings.enabled
@@ -220,7 +219,7 @@ struct SettingsSheet: View {
                     Text("还不能从 App Store 安装，用 Xcode 侧载；表上没装好时用手机自带录音替代。链接 daytap://recordings 会回到录音列表。")
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("我的")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: cloudEnabled) { _, on in
                 CloudSyncSettings.enabled = on
@@ -231,13 +230,10 @@ struct SettingsSheet: View {
                 cloudSync.settingsChanged()
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
+                // #82 迁入「我的」tab:取消随 sheet 语义消失,改完点保存即落。
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") {
                         persist()
-                        dismiss()
                     }
                 }
             }

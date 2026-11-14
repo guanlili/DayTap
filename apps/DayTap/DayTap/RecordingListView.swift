@@ -36,12 +36,9 @@ struct RecordingListView: View {
     @State private var transcriptRecord: RecordingRecord?
     @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
-    // 设置(#40):配置从指南独立出来,⋯ 菜单进。
-    @State private var showSettings = false
+    // 设置(#40→#82):迁入「我的」tab;本周回顾(#43→#82)迁入「成长」tab,⋯ 菜单两入口移除。
     // 导出选项页(#41):格式×内容在页里选,不再一击定死 Markdown。
     @State private var showExport = false
-    // 本周回顾(#43):⋯ 菜单进,把一周的积累看见。
-    @State private var showReview = false
     // 批量管理(#25):编辑态、选中集、批量分享/删除。
     @State private var isEditing = false
     @State private var selectedIDs: Set<String> = []
@@ -122,7 +119,8 @@ struct RecordingListView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    // ⋯ 菜单(#40):低频入口收敛——导出(#41 选项页)/指南/设置,一个图标三个动作。
+                    // ⋯ 菜单(#40→#82):低频入口收敛——导出/指南两个动作;
+                    // 设置去了「我的」tab,本周回顾去了「成长」tab。
                     Menu {
                         Button {
                             showExport = true
@@ -133,26 +131,11 @@ struct RecordingListView: View {
                         .accessibilityIdentifier("daytap.export.md")
 
                         Button {
-                            showReview = true
-                        } label: {
-                            Label("本周回顾", systemImage: "chart.bar.xaxis")
-                        }
-                        .disabled(activeRecords.isEmpty)
-                        .accessibilityIdentifier("daytap.review")
-
-                        Button {
                             showGuide = true
                         } label: {
                             Label("使用指南", systemImage: "book")
                         }
                         .accessibilityIdentifier("daytap.guide")
-
-                        Button {
-                            showSettings = true
-                        } label: {
-                            Label("设置", systemImage: "gearshape")
-                        }
-                        .accessibilityIdentifier("daytap.settings")
                     } label: {
                         Image(systemName: "ellipsis")
                     }
@@ -258,14 +241,8 @@ struct RecordingListView: View {
         .sheet(isPresented: $showGuide) {
             GuideSheet()
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsSheet(transcriber: transcriber)
-        }
         .sheet(isPresented: $showExport) {
             ExportSheet(records: visibleRecords, category: categoryFilter)
-        }
-        .sheet(isPresented: $showReview) {
-            ReviewSheet(records: activeRecords, library: library, player: player)
         }
     }
 

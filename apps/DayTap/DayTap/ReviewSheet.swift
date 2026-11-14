@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// 本周回顾(#43):条数/时长/类别分布/待办汇总,纯本地聚合。
-/// 本周回顾(#43):把攒了一周的录音看见——概览/类别分布/待办汇总,数据全现成,纯本地聚合。
+/// 本周回顾(#43→#82 迁入成长 tab):条数/时长/类别分布/待办汇总,纯本地聚合。
 /// 滚动「最近 7 天」而非卡历周,避免周一重置割裂周末;仅统计未删除条目。
+/// #82 起常驻 tab:records 改由 library 实时推导(录音页 ⋯ 菜单的 sheet 入口已移除)。
 struct ReviewSheet: View {
-    let records: [RecordingRecord]
-    var library: RecordingLibrary? = nil
-    /// #75 待办回链:跳出处要起播——用列表同一个 PlaybackCenter(不新建,播放态才互通)。
-    var player: PlaybackCenter? = nil
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var library: RecordingLibrary
+    /// #75 待办回链:跳出处要起播——与各页共用同一个 PlaybackCenter,播放态互通。
+    @ObservedObject var player: PlaybackCenter
+
+    private var records: [RecordingRecord] { library.records }
 
     private var weekRecords: [RecordingRecord] {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) else { return [] }
@@ -38,8 +38,7 @@ struct ReviewSheet: View {
     /// 待办汇总(最近 7 天):按录音归组,带来源标题。
     /// 勾选落库(#61):本周回顾里也能勾,与摘要卡同一条数据。
     private func toggleDone(_ recordID: String, _ updated: ActionItem) {
-        guard let library,
-              var fresh = library.record(id: recordID),
+        guard var fresh = library.record(id: recordID),
               var items = fresh.actionItems,
               let index = items.firstIndex(where: { $0.id == updated.id })
         else { return }
@@ -49,17 +48,13 @@ struct ReviewSheet: View {
         library.upsert(fresh)
     }
 
-    /// #75 待办回链:找到锚点才有「跳到出处」;跳播并关回顾页——
-    /// 回到列表看那条录音的播放态,比隔着 sheet 听凭空响起的音频直观。
+    /// #75 待办回链:找到锚点才有「跳到出处」;tab 常驻后不再关页——
+    /// 跳播即起,底部播放条(与 Day 页同款)让「什么在响」可见。
     private func jumpToSource(recordID: String, item: ActionItem) -> (() -> Void)? {
-        guard let player, let library,
-              let record = records.first(where: { $0.id == recordID }),
+        guard let record = records.first(where: { $0.id == recordID }),
               let anchor = ActionItemAnchor.offset(for: item.text, segments: record.transcriptSegments ?? [])
         else { return nil }
-        return {
-            player.toggle(record, fileURL: library.fileURL(id: record.id), at: anchor)
-            dismiss()
-        }
+        return { player.toggle(record, fileURL: library.fileURL(id: record.id), at: anchor) }
     }
 
     private var todoGroups: [(id: String, title: String, recordID: String, items: [ActionItem])] {
@@ -145,12 +140,16 @@ struct ReviewSheet: View {
                     }
                 }
             }
-            .navigationTitle("本周回顾")
+            .navigationTitle("成长")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+            // #82 tab 常驻:完成按钮随 sheet 语义移除;跳到出处后播什么,底部说。
+            .safeAreaInset(edge: .bottom) {
+                if let playingID = player.playingID,
+                   let record = library.records.first(where: { $0.id == playingID }) {
+                    PlaybackBarView(player: player, record: record)
                 }
+            }
+            .toolbar {
                 ToolbarItem(placement: .bottomBar) {
                     if !todoGroups.isEmpty {
                         Button {

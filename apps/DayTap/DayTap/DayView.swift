@@ -37,7 +37,7 @@ struct DayView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .navigationTitle("Day")
+            .navigationTitle("计划")
             .navigationBarTitleDisplayMode(.inline)
             // 跳到出处/点录音行的播放在本页可见(#80):与录音页同一个 PlaybackCenter。
             .safeAreaInset(edge: .bottom) {
