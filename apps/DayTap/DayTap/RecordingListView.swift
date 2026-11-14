@@ -34,6 +34,8 @@ struct RecordingListView: View {
     @State private var newName = ""
     @State private var deletingRecord: RecordingRecord?
     @State private var transcriptRecord: RecordingRecord?
+    // 事的聚合(#78):sheet(item:) 现挂。
+    @State private var affairRecord: RecordingRecord?
     @State private var shareRecord: RecordingRecord?
     @State private var showGuide = false
     // 设置(#40→#82):迁入「我的」tab;本周回顾(#43→#82)迁入「成长」tab,⋯ 菜单两入口移除。
@@ -202,6 +204,9 @@ struct RecordingListView: View {
                 player: player,
                 clock: player.clock
             )
+        }
+        .sheet(item: $affairRecord) { record in
+            AffairSheet(seed: record, transcriber: transcriber, allRecords: activeRecords)
         }
         .sheet(item: $shareRecord) { record in
             // #34:分享走带名副本(名字/时间戳),不再让接收方看到 UUID;「存到文件」同源。
@@ -832,6 +837,14 @@ struct RecordingListView: View {
                 Label("查看全文", systemImage: "text.quote")
             }
             .accessibilityIdentifier("daytap.transcript.\(record.id)")
+
+            // 事的聚合(#78):找同话题的其他录音,出跨录音进展摘要。
+            Button {
+                affairRecord = record
+            } label: {
+                Label("聚合相关录音…", systemImage: "square.stack.3d.up")
+            }
+            .accessibilityIdentifier("daytap.affair.\(record.id)")
 
             // #30 一键复制:不进 sheet 直接把全文放进剪贴板。
             Button {

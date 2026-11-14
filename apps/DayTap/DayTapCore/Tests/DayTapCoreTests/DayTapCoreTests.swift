@@ -661,4 +661,81 @@ func testRecordDecodesLegacyWithoutPeople() {
     """
     XCTAssertNil(CloudSyncLogic.decode(json)?.people)
 }
+
+}
+
+extension DayTapCoreTests {
+// MARK: - #78 AffairCluster
+
+private static func affairRecord(
+    id: String,
+    daysAgo: Int,
+    title: String,
+    summary: String = "",
+    people: [String] = [],
+    todos: [String] = [],
+    deleted: Bool = false
+) -> RecordingRecord {
+    var record = Self.record(id: id)
+    record.createdAt = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+    record.displayName = title
+    record.summary = summary.isEmpty ? nil : summary
+    record.people = people.isEmpty ? nil : people
+    record.actionItems = todos.map { ActionItem(text: $0) }
+    if deleted { record.deletedAt = record.createdAt }
+    return record
+}
+
+/// 相关判定:同人物+沾边、纯文本高重叠各自命中;不相关的、出窗的、回收站的、没内容的不进。
+func testAffairClusterRelatedRules() {
+    let now = Date()
+    let seed = Self.affairRecord(
+        id: "seed", daysAgo: 0,
+        title: "青云项目周会",
+        summary: "聊了青云项目二期排期和小周负责的接口",
+        people: ["小周"], todos: ["周五前回小周消息"]
+    )
+    let samePerson = Self.affairRecord(
+        id: "same-person", daysAgo: 2,
+        title: "和小周对接口", summary: "小周说接口这周能好",
+        people: ["小周"]
+    )
+    let textOverlap = Self.affairRecord(
+        id: "text-overlap", daysAgo: 5,
+        title: "青云项目二期排期又聊了一次",
+        summary: "青云项目二期排期没定,小周接口还在等",
+        people: []
+    )
+    let unrelated = Self.affairRecord(
+        id: "unrelated", daysAgo: 1,
+        title: "周末爬山计划", summary: "走哪条路线带什么吃的", people: ["老李"]
+    )
+    let outOfWindow = Self.affairRecord(
+        id: "old", daysAgo: 40,
+        title: "青云项目立项", summary: "青云项目二期排期和小周接口", people: ["小周"]
+    )
+    let deleted = Self.affairRecord(
+        id: "gone", daysAgo: 1,
+        title: "青云项目杂谈", summary: "青云项目二期排期", deleted: true
+    )
+    let related = AffairCluster.relatedRecords(
+        seed: seed,
+        in: [seed, samePerson, textOverlap, unrelated, outOfWindow, deleted],
+        now: now
+    )
+    XCTAssertEqual(Set(related.map { $0.id }), ["same-person", "text-overlap"])
+}
+
+/// 结果按时间正序(早的先——进展叙事要时间线),上限 8 条。
+func testAffairClusterOrderAndCap() {
+    let now = Date()
+    let seed = Self.affairRecord(id: "seed", daysAgo: 0, title: "青云项目", summary: "青云二期", people: ["小周"])
+    let many = (1...10).map { index in
+        Self.affairRecord(id: "r\(index)", daysAgo: index, title: "青云项目第\(index)次", summary: "青云二期推进", people: ["小周"])
+    }
+    let related = AffairCluster.relatedRecords(seed: seed, in: [seed] + many, now: now)
+    XCTAssertEqual(related.count, AffairCluster.maxRelated)
+    XCTAssertEqual(related.map { $0.id }, ["r10", "r9", "r8", "r7", "r6", "r5", "r4", "r3"])
+}
+
 }

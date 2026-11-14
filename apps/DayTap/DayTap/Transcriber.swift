@@ -568,6 +568,96 @@ final class TranscriptionCenter: ObservableObject {
         }
     }
 
+    // MARK: - #78 事的聚合
+
+    /// 跨录音进展摘要:把相关各条(时间正序)的 日期/标题/摘要/章节要点/未完成待办 拼输入,
+    /// 引擎同摘要瀑布;不落库、不动 statusText——按需一次性,结果由聚合页自己呈现。
+    func affairSummary(records: [RecordingRecord]) async -> AffairResult? {
+        let lines = records.sorted { $0.createdAt < $1.createdAt }.map { record -> String in
+            var line = "【\(record.createdAt.formatted(date: .abbreviated, time: .omitted)) · \(record.title)】"
+            if let summary = record.summary { line += summary }
+            for chapter in record.chapters ?? [] {
+                if let points = chapter.keyPoints { line += ";要点:\(points)" }
+            }
+            for todo in record.actionItems ?? [] where !todo.isDone {
+                line += ";未办:\(todo.text)"
+            }
+            return line
+        }
+        let user = Self.digestContext
+            + "\n以下是同一件事的多条录音(按时间正序):\n" + String(lines.joined(separator: "\n").prefix(6000))
+            + "\n请汇总这件事的进展。"
+        let model = SystemLanguageModel.default
+        if model.isAvailable, let result = await onDeviceAffair(user: user, model: model) {
+            return result
+        }
+        if LLMSettings.isConfigured, let result = await cloudAffair(user: user) {
+            return result
+        }
+        DayTapLog.transcribe.info("affair summary unavailable: on-device=\(model.isAvailable), cloud=\(LLMSettings.isConfigured)")
+        return nil
+    }
+
+    private func onDeviceAffair(user: String, model: SystemLanguageModel) async -> AffairResult? {
+        let session = LanguageModelSession(
+            model: model,
+            instructions: "你汇总同一件事的多条录音进展,只依据给出的内容,用简体中文,不发明没提过的信息。"
+        )
+        do {
+            let response = try await session.respond(to: user, generating: AffairDigest.self)
+            let raw = response.content
+            return Self.normalizedAffair(status: raw.status, highlights: raw.highlights, todos: raw.openTodos)
+        } catch {
+            DayTapLog.transcribe.info("affair on-device failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private func cloudAffair(user: String) async -> AffairResult? {
+        guard let client = LLMClient() else { return nil }
+        struct AffairPayload: Decodable {
+            var status: String?
+            var highlights: [String]?
+            var openTodos: [String]?
+        }
+        do {
+            let reply = try await client.chat(
+                system: "你汇总同一件事的多条录音进展,只依据给出的内容,用简体中文,不发明没提过的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:status(现状,不超过三句话),highlights(数组,按时间列关键进展,每条一句话,可带日期),openTodos(数组,还没办完的事,每条一句话;没有给空数组)。",
+                user: user
+            )
+            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
+                DayTapLog.transcribe.info("affair cloud no json")
+                return nil
+            }
+            guard let payload = try? JSONDecoder().decode(AffairPayload.self, from: Data(text[start...end].utf8)) else {
+                DayTapLog.transcribe.info("affair cloud bad json head=\(text[start...].prefix(200), privacy: .public)")
+                return nil
+            }
+            return Self.normalizedAffair(
+                status: payload.status ?? "",
+                highlights: payload.highlights ?? [],
+                todos: payload.openTodos ?? []
+            )
+        } catch {
+            DayTapLog.transcribe.info("affair cloud failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// 两引擎输出的统一规整:去空串、截长、上限(highlights 8 条/todos 10 条)。
+    static func normalizedAffair(status: String, highlights: [String], todos: [String]) -> AffairResult {
+        AffairResult(
+            status: String(status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)),
+            highlights: highlights.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)) }
+                .filter { !$0.isEmpty }
+                .prefix(8).map { $0 },
+            openTodos: todos.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40)) }
+                .filter { !$0.isEmpty }
+                .prefix(10).map { $0 }
+        )
+    }
+
     /// #77 同题对照:用**临时配置**(不落库,关页即弃)对同一段转写出一份摘要。
     /// 不写库、不动 statusText——错误原样抛给对照页自己说。
     func compareDigest(transcript: String, baseURL: String, model: String, apiKey: String) async throws -> CompareResult {
@@ -854,6 +944,24 @@ struct DayPlan {
     var minutes: [Int]
     @Guide(description: "与 titles 一一对应的类型:运动、专注、休息、复盘 之一")
     var kinds: [String]
+}
+
+/// 事的聚合结果(#78):现状+按时间的关键进展+未决待办;零实体,不落库。
+struct AffairResult: Equatable {
+    var status: String
+    var highlights: [String]
+    var openTodos: [String]
+}
+
+/// @Generable 的聚合结构化输出(#78)。
+@Generable
+struct AffairDigest {
+    @Guide(description: "这件事的现状,不超过三句话")
+    var status: String
+    @Guide(description: "按时间排列的关键进展,每条一句话,可带日期;给 2 到 8 条")
+    var highlights: [String]
+    @Guide(description: "还没办完的事,每条一句话;没有给空列表")
+    var openTodos: [String]
 }
 
 /// 云端 actionItems 的宽容解码(#61→#70):兼容旧裸串、新 {text,due,direction};
