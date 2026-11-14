@@ -6,6 +6,8 @@ import SwiftUI
 struct ReviewSheet: View {
     let records: [RecordingRecord]
     var library: RecordingLibrary? = nil
+    /// #75 待办回链:跳出处要起播——用列表同一个 PlaybackCenter(不新建,播放态才互通)。
+    var player: PlaybackCenter? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var weekRecords: [RecordingRecord] {
@@ -45,6 +47,19 @@ struct ReviewSheet: View {
         fresh.actionItems = items
         fresh.updatedAt = Date()  // 勾选也是变更(#62)
         library.upsert(fresh)
+    }
+
+    /// #75 待办回链:找到锚点才有「跳到出处」;跳播并关回顾页——
+    /// 回到列表看那条录音的播放态,比隔着 sheet 听凭空响起的音频直观。
+    private func jumpToSource(recordID: String, item: ActionItem) -> (() -> Void)? {
+        guard let player, let library,
+              let record = records.first(where: { $0.id == recordID }),
+              let anchor = ActionItemAnchor.offset(for: item.text, segments: record.transcriptSegments ?? [])
+        else { return nil }
+        return {
+            player.toggle(record, fileURL: library.fileURL(id: record.id), at: anchor)
+            dismiss()
+        }
     }
 
     private var todoGroups: [(id: String, title: String, recordID: String, items: [ActionItem])] {
@@ -113,6 +128,7 @@ struct ReviewSheet: View {
                                                 item: item,
                                                 sourceTitle: group.title,
                                                 onToggleDone: { updated in toggleDone(group.recordID, updated) },
+                                                onJumpToSource: jumpToSource(recordID: group.recordID, item: item),
                                                 feedback: $reviewFeedback
                                             )
                                         }

@@ -459,3 +459,43 @@ func testTransferGateIntact() {
     XCTAssertFalse(TransferGate.intact(indexed: false, fileExists: true, expected: 9_000, fileSize: 9_000, decodable: true))
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #75 ActionItemAnchor
+
+private static func segment(_ text: String, _ start: Double) -> TranscriptSegment {
+    TranscriptSegment(text: text, start: start, duration: 3)
+}
+
+/// 待办是口语的压缩改写,不是原句——覆盖式打分要能跨过改写命中原声段,
+/// 且不被只沾了通用词的别段抢走。
+func testActionItemAnchorMatchesCondensedRewrite() {
+    let segments = [
+        Self.segment("上午先对一下青云项目的进度", 0),
+        Self.segment("那我周五之前得给小周回个消息说清楚", 30),
+        Self.segment("中午吃饭随便聊聊", 60),
+    ]
+    XCTAssertEqual(ActionItemAnchor.offset(for: "周五前给小周回消息", segments: segments), 30)
+}
+
+/// 匹配不上就老实返回 nil——「匹配不上不显示入口」的依据。
+func testActionItemAnchorNoMatchReturnsNil() {
+    let segments = [
+        Self.segment("今天天气不错", 0),
+        Self.segment("中午吃什么", 20),
+    ]
+    XCTAssertNil(ActionItemAnchor.offset(for: "季度汇报整理成表格", segments: segments))
+    // 待办太短(不足二字组)或没有分段:同样无锚点。
+    XCTAssertNil(ActionItemAnchor.offset(for: "回", segments: segments))
+    XCTAssertNil(ActionItemAnchor.offset(for: "随便什么待办", segments: []))
+}
+
+/// 同覆盖取先出现的段:读稿顺序在前面的出处优先。
+func testActionItemAnchorPrefersEarlierSegmentOnTie() {
+    let segments = [
+        Self.segment("这件事周五再说", 0),
+        Self.segment("还是周五再说吧", 40),
+    ]
+    XCTAssertEqual(ActionItemAnchor.offset(for: "周五再说", segments: segments), 0)
+}
+}

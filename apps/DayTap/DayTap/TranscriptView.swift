@@ -27,6 +27,15 @@ struct TranscriptView: View {
         library.upsert(fresh)
     }
 
+    /// #75 待办回链:分段里找得到锚点才给「跳到出处」;跳播与点句跳播同一通道,
+    /// 正在播这条时原地 seek,没播则从锚点起播。
+    private func jumpToSource(for item: ActionItem) -> (() -> Void)? {
+        guard let record,
+              let anchor = ActionItemAnchor.offset(for: item.text, segments: record.transcriptSegments ?? [])
+        else { return nil }
+        return { player.toggle(record, fileURL: library.fileURL(id: record.id), at: anchor) }
+    }
+
     private var record: RecordingRecord? {
         library.record(id: recordID)
     }
@@ -135,6 +144,7 @@ struct TranscriptView: View {
                                     item: item,
                                     sourceTitle: record?.title ?? recordID,
                                     onToggleDone: { toggleDone($0) },
+                                    onJumpToSource: jumpToSource(for: item),
                                     feedback: $actionFeedback
                                 )
                             }

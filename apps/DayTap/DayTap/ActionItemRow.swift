@@ -106,13 +106,16 @@ enum SystemInterop {
     }
 }
 
-/// 待办行(#61/#62):轻点=完成态勾选划线;尾部菜单=添加到提醒事项(默认)/日历/复制。
+/// 待办行(#61/#62):轻点=完成态勾选划线;尾部菜单=跳到出处(#75)/添加到提醒事项(默认)/日历/复制。
 /// item 只读——勾选经 onToggleDone 落库,刷新由宿主的库观察驱动(不再依赖绑定可写)。
 struct ActionItemRow: View {
     let item: ActionItem
     /// 日历事件备注里的来源显示名(录音标题)。
     let sourceTitle: String
     let onToggleDone: (ActionItem) -> Void
+    /// #75 待办回链:跳到该条待办的原声出处。宿主在分段里找不到锚点时传 nil——
+    /// 匹配不上不显示入口,菜单里不出现这一项。
+    var onJumpToSource: (() -> Void)? = nil
     /// 行内结果反馈(添加成功/失败的一行小字)。
     @Binding var feedback: String
 
@@ -148,6 +151,12 @@ struct ActionItemRow: View {
             Spacer(minLength: 4)
 
             Menu {
+                if let onJumpToSource {
+                    Button(action: onJumpToSource) {
+                        Label("跳到出处", systemImage: "waveform")
+                    }
+                    Divider()
+                }
                 Button {
                     confirmReminders = true
                 } label: {
