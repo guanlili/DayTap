@@ -41,6 +41,7 @@ struct TranscriptView: View {
                 if let segments = record?.transcriptSegments, !segments.isEmpty {
                     VStack(spacing: 0) {
                         digestCard
+                        chapterBar
                         segmentList(segments)
                     }
                 } else if let text = record?.transcript {
@@ -121,13 +122,22 @@ struct TranscriptView: View {
                 }
                 if let actions = record?.actionItems, !actions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(actions) { item in
-                            ActionItemRow(
-                                item: item,
-                                sourceTitle: record?.title ?? recordID,
-                                onToggleDone: { toggleDone($0) },
-                                feedback: $actionFeedback
-                            )
+                        // #70:混有「别人答应的」才分组带头标,纯行动项保持原样不加噪音。
+                        ForEach(Array(actions.directionGroups.enumerated()), id: \.offset) { _, group in
+                            if let label = group.label {
+                                Text(label)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Color.secondary)
+                                    .padding(.top, 2)
+                            }
+                            ForEach(group.items) { item in
+                                ActionItemRow(
+                                    item: item,
+                                    sourceTitle: record?.title ?? recordID,
+                                    onToggleDone: { toggleDone($0) },
+                                    feedback: $actionFeedback
+                                )
+                            }
                         }
                         if !actionFeedback.isEmpty {
                             Text(actionFeedback)
@@ -158,16 +168,53 @@ struct TranscriptView: View {
             parts.append("【摘要】\(summary)")
         }
         if let actions = record.actionItems, !actions.isEmpty {
-            parts.append("【待办】\n" + actions.map { item in
-                var line = "· \(item.text)"
-                if let due = item.dueAt {
-                    line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+            let todoBlock = actions.directionGroups.compactMap { group -> String? in
+                let lines = group.items.map { item -> String in
+                    var line = "· \(item.text)"
+                    if let due = item.dueAt {
+                        line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+                    }
+                    if item.isDone { line += " ✓" }
+                    return line
                 }
-                if item.isDone { line += " ✓" }
-                return line
-            }.joined(separator: "\n"))
+                guard !lines.isEmpty else { return nil }
+                return (group.label.map { "○ \($0)\n" } ?? "") + lines.joined(separator: "\n")
+            }.joined(separator: "\n")
+            parts.append("【待办】\n" + todoBlock)
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    // MARK: - 章节条(#68)
+
+    /// 摘要卡与逐字稿之间、钉在滚动区外:分块 digest 产出的章节,点章跳到那一刻播。
+    /// 与点句跳播同一入口(toggle(at:)),无分段/短录音自动不出现。
+    @ViewBuilder
+    private var chapterBar: some View {
+        if let chapters = record?.chapters, chapters.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
+                        Button {
+                            guard fileExists, let record else { return }
+                            player.toggle(record, fileURL: library.fileURL(id: recordID), at: chapter.start)
+                        } label: {
+                            Text("\(DayTapFormat.clock(chapter.start)) \(chapter.title)")
+                                .font(.caption2.weight(.medium).monospacedDigit())
+                                .foregroundStyle(Color.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("跳到「\(chapter.title)»,\(Int(chapter.start)) 秒处")
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            }
+        }
     }
 
     // MARK: - 时间戳分段(#32)

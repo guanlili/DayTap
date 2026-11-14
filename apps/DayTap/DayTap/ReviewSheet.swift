@@ -101,13 +101,21 @@ struct ReviewSheet: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(group.title)
                                         .font(.subheadline.weight(.semibold))
-                                    ForEach(group.items) { item in
-                                        ActionItemRow(
-                                            item: item,
-                                            sourceTitle: group.title,
-                                            onToggleDone: { updated in toggleDone(group.recordID, updated) },
-                                            feedback: $reviewFeedback
-                                        )
+                                    // #70:混有「别人答应的」才分组,纯行动项不加头标。
+                                    ForEach(Array(group.items.directionGroups.enumerated()), id: \.offset) { _, sub in
+                                        if let label = sub.label {
+                                            Text(label)
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        ForEach(sub.items) { item in
+                                            ActionItemRow(
+                                                item: item,
+                                                sourceTitle: group.title,
+                                                onToggleDone: { updated in toggleDone(group.recordID, updated) },
+                                                feedback: $reviewFeedback
+                                            )
+                                        }
                                     }
                                 }
                                 .padding(.vertical, 2)
@@ -142,16 +150,20 @@ struct ReviewSheet: View {
         }
     }
 
-    /// 「复制全部待办」的文本:按来源分组,与摘要卡同符号体系。
+    /// 「复制全部待办」的文本:按来源分组,与摘要卡同符号体系(#70:混向再分两层)。
     private var todoText: String {
         "【待办 · 最近 7 天】\n" + todoGroups.map { group in
-            "■ \(group.title)\n" + group.items.map { item in
-                var line = "· \(item.text)"
-                if let due = item.dueAt {
-                    line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+            "■ \(group.title)\n" + group.items.directionGroups.compactMap { sub in
+                let lines = sub.items.map { item -> String in
+                    var line = "· \(item.text)"
+                    if let due = item.dueAt {
+                        line += "（截止 \(due.formatted(date: .abbreviated, time: .shortened))）"
+                    }
+                    if item.isDone { line += " ✓" }
+                    return line
                 }
-                if item.isDone { line += " ✓" }
-                return line
+                guard !lines.isEmpty else { return nil }
+                return (sub.label.map { "○ \($0)\n" } ?? "") + lines.joined(separator: "\n")
             }.joined(separator: "\n")
         }.joined(separator: "\n\n")
     }

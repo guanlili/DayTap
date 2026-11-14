@@ -15,6 +15,27 @@ enum TransferState: String, Codable {
     case failed
 }
 
+/// 承诺方向(#70):AI 按语气区分「我答应别人的」(me,行动项)与「别人答应我的」
+/// (other,等待项)。裸串原始值与 AI 输出直配,未知值解码为 nil 视作 me。
+enum ActionDirection: String, Codable {
+    case me
+    case other
+}
+
+extension Array where Element == ActionItem {
+    /// #70 分组呈现:混有「别人答应的」才分两组(我答应的在前,组内保序),
+    /// 纯行动项单组不带头标——没混淆时不加视觉噪音。
+    var directionGroups: [(label: String?, items: [ActionItem])] {
+        let others = filter { $0.direction == .other }
+        if others.isEmpty { return [(nil, self)] }
+        let mine = filter { $0.direction != .other }
+        var groups: [(String?, [ActionItem])] = []
+        if !mine.isEmpty { groups.append(("我答应的", mine)) }
+        groups.append(("别人答应的", others))
+        return groups
+    }
+}
+
 /// 待办 2.0(#61):AI 从转写全文识别的行动项,带完成态与可选截止时间。
 /// 自定义解码兼容旧索引——旧版 actionItems 是纯字符串数组,裸串解码为「未完成、无时间」。
 struct ActionItem: Codable, Equatable, Identifiable {
@@ -22,13 +43,17 @@ struct ActionItem: Codable, Equatable, Identifiable {
     var isDone: Bool = false
     /// AI 识别的截止时间(「周五下午」类表述归一化而来);没有则 nil。
     var dueAt: Date? = nil
+    /// 承诺方向(#70):me=我答应别人的(行动项),other=别人答应我的(等待项)。
+    /// nil=旧数据/模型没区分,呈现上视作 me,不单独分组。
+    var direction: ActionDirection? = nil
 
     var id: String { text }
 
-    init(text: String, isDone: Bool = false, dueAt: Date? = nil) {
+    init(text: String, isDone: Bool = false, dueAt: Date? = nil, direction: ActionDirection? = nil) {
         self.text = text
         self.isDone = isDone
         self.dueAt = dueAt
+        self.direction = direction
     }
 
     init(from decoder: Decoder) throws {
@@ -36,13 +61,17 @@ struct ActionItem: Codable, Equatable, Identifiable {
             text = legacy
             isDone = false
             dueAt = nil
+            direction = nil
             return
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         text = try container.decode(String.self, forKey: .text)
         isDone = try container.decodeIfPresent(Bool.self, forKey: .isDone) ?? false
         dueAt = try container.decodeIfPresent(Date.self, forKey: .dueAt)
+        direction = (try? container.decodeIfPresent(ActionDirection.self, forKey: .direction)) ?? nil
     }
+
+    enum CodingKeys: String, CodingKey { case text, isDone, dueAt, direction }
 
     /// 解析 AI 输出的截止时间(#61):yyyy-MM-dd HH:mm 优先,退 yyyy-MM-dd;
     /// 空/格式不对一律 nil——识别失败不添乱。
@@ -71,6 +100,13 @@ struct TranscriptSegment: Codable, Equatable {
     var duration: Double
 }
 
+/// 长录音章节(#68):分块 digest 时由块级摘要产出(块主题短标题+块起点),点章跳播。
+struct Chapter: Codable, Equatable {
+    var title: String
+    /// 距录音开始的秒数,取块内首段的 start。
+    var start: Double
+}
+
 /// 手表和 iPhone 共用的一条录音索引。文件名永远由 `id` 推导，不采用对方传来的路径。
 struct RecordingRecord: Codable, Identifiable, Equatable {
     var id: String
@@ -88,6 +124,9 @@ struct RecordingRecord: Codable, Identifiable, Equatable {
     var transcript: String?
     /// 带时间戳的转写分段(#29)。nil=旧转写或没转过——可搜索、不可跳播,UI 自动降级。
     var transcriptSegments: [TranscriptSegment]? = nil
+    /// 长录音章节(#68):分块 digest 顺带产出,短录音(单块)无章节。
+    /// 可选字段,旧 index.json 解码为 nil 天然向后兼容;不参与手表传输协议。
+    var chapters: [Chapter]? = nil
     /// 录音来源(#3):nil=手表(旧数据天然如此),"phone"=手机直接录。
     /// 可选字段,默认 nil 向后兼容;不参与手表传输协议(手机录的永远不出本机)。
     var origin: String? = nil

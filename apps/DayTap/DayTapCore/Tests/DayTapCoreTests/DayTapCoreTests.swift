@@ -208,6 +208,92 @@ final class DayTapCoreTests: XCTestCase {
         XCTAssertGreaterThan(density[8], 0)
     }
 
+    // MARK: - 转写分块(#68)
+
+    /// 降级口径:无分段/空/总量不超限 → nil,调用方走单次 digest 不产章节。
+    func testTranscriptChunkingDegrades() {
+        XCTAssertNil(TranscriptChunking.blocks(nil))
+        XCTAssertNil(TranscriptChunking.blocks([]))
+        let short = (0..<5).map { i in
+            TranscriptSegment(text: "短句", start: Double(i), duration: 0.5)
+        }
+        XCTAssertNil(TranscriptChunking.blocks(short))
+        // 纯空白文本的分段等于没内容。
+        let blank = [TranscriptSegment(text: "  ", start: 0, duration: 3)]
+        XCTAssertNil(TranscriptChunking.blocks(blank))
+    }
+
+    /// 切分口径:切口落段边界不腰斩句子,块起点=块内首段 start,块内文本按行拼接。
+    func testTranscriptChunkingSplits() {
+        let segments = (0..<8).map { i in
+            TranscriptSegment(text: String(repeating: "字", count: 600), start: Double(i) * 10, duration: 9)
+        }
+        let blocks = TranscriptChunking.blocks(segments, limit: 1000)!
+        XCTAssertGreaterThanOrEqual(blocks.count, 2)
+        XCTAssertEqual(blocks[0].start, 0)
+        XCTAssertEqual(blocks[1].start, 10)  // 第二块从段 1 起(600+600>1000,段 0 独占一块)
+        for block in blocks {
+            XCTAssertEqual(block.text.count, 600)  // 单段成块,不拆段
+        }
+    }
+
+    /// 章节(#68)向后兼容:旧索引无 chapters 解码为 nil;新数据往返不丢。
+    func testChaptersRoundTripAndLegacy() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let legacyJSON = """
+        {"id":"a","createdAt":"2026-11-14T10:00:00Z","durationSeconds":62,"byteCount":1000,
+         "state":"acknowledged","lastError":null,"updatedAt":"2026-11-14T10:01:00Z"}
+        """
+        let legacy = try decoder.decode(RecordingRecord.self, from: Data(legacyJSON.utf8))
+        XCTAssertNil(legacy.chapters)
+
+        var fresh = legacy
+        fresh.chapters = [Chapter(title: "季度评审", start: 0), Chapter(title: "扩容报价", start: 1830)]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let back = try decoder.decode(RecordingRecord.self, from: try encoder.encode(fresh))
+        XCTAssertEqual(back.chapters, fresh.chapters)
+    }
+
+    // MARK: - 承诺方向(#70)
+
+    /// 解码口径:旧裸串→nil;新对象带 me/other;未知值→nil(呈现视作 me)。
+    func testActionDirectionDecode() throws {
+        let legacy = try JSONDecoder().decode([ActionItem].self, from: Data("[\"旧条目\"]".utf8))
+        XCTAssertNil(legacy[0].direction)
+        let modern = try JSONDecoder().decode(
+            [ActionItem].self,
+            from: Data(#"[{"text":"报价方案","isDone":false,"direction":"other"},{"text":"我发纪要"}]"#.utf8)
+        )
+        XCTAssertEqual(modern[0].direction, .other)
+        XCTAssertNil(modern[1].direction)
+        let unknown = try JSONDecoder().decode(
+            [ActionItem].self,
+            from: Data(#"[{"text":"未知","direction":"wat"}]"#.utf8)
+        )
+        XCTAssertNil(unknown[0].direction)
+    }
+
+    /// 分组口径:纯行动项单组无头标;混向才分「我答应的/别人答应的」,组内保序。
+    func testActionDirectionGroups() {
+        let mine1 = ActionItem(text: "我发方案")
+        let mine2 = ActionItem(text: "我订会议室", direction: .me)
+        let other1 = ActionItem(text: "对方出报价", direction: .other)
+
+        let single = [mine1, mine2].directionGroups
+        XCTAssertEqual(single.count, 1)
+        XCTAssertNil(single[0].label)
+        XCTAssertEqual(single[0].items.count, 2)
+
+        let mixed = [mine1, other1, mine2].directionGroups
+        XCTAssertEqual(mixed.count, 2)
+        XCTAssertEqual(mixed[0].label, "我答应的")
+        XCTAssertEqual(mixed[0].items.map(\.text), ["我发方案", "我订会议室"])
+        XCTAssertEqual(mixed[1].label, "别人答应的")
+        XCTAssertEqual(mixed[1].items.map(\.text), ["对方出报价"])
+    }
+
     // MARK: - 工具
 
     private static func record(

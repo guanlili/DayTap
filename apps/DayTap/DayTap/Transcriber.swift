@@ -62,15 +62,17 @@ final class TranscriptionCenter: ObservableObject {
         stale.summary = nil
         stale.autoTitle = nil
         stale.actionItems = nil
+        stale.chapters = nil
         library.upsert(stale)
         // #67:预清先留底——转写失败时派生字段(含用户勾选态)可回滚,
         // 不停在「旧全文+无摘要+无待办」的裸态。
-        retranscribeBackup[record.id] = (record.summary, record.autoTitle, record.actionItems)
+        retranscribeBackup[record.id] = (record.summary, record.autoTitle, record.actionItems, record.chapters)
         transcribe(record)
     }
 
-    /// 重转预清前的派生字段快照(#67 失败回滚用)。
-    private var retranscribeBackup: [String: (summary: String?, autoTitle: String?, actions: [ActionItem]?)] = [:]
+    /// 重转预清前的派生字段快照(#67 失败回滚用;#68 起 chapters 一并留底)。
+    private var retranscribeBackup:
+        [String: (summary: String?, autoTitle: String?, actions: [ActionItem]?, chapters: [Chapter]?)] = [:]
 
     private func rollbackRetranscribe(id: String) {
         guard let backup = retranscribeBackup.removeValue(forKey: id),
@@ -79,6 +81,7 @@ final class TranscriptionCenter: ObservableObject {
         fresh.summary = backup.summary
         fresh.autoTitle = backup.autoTitle
         fresh.actionItems = backup.actions
+        fresh.chapters = backup.chapters
         library.upsert(fresh)
         DayTapLog.transcribe.info("retranscribe rollback \(id, privacy: .public)")
     }
@@ -250,7 +253,7 @@ final class TranscriptionCenter: ObservableObject {
             // 转写本体已成功:此刻清掉「正在转写…」;digest 若有话说(不可用/失败)会再设——
             // #59:start() 不再兜底清,清场职责移到这里。
             statusText = nil
-            let result = await digest(transcript: trimmed)
+            let result = await digest(transcript: trimmed, segments: segments)
             if fresh.category == nil {
                 fresh.category = result?.category
             }
@@ -260,6 +263,8 @@ final class TranscriptionCenter: ObservableObject {
             if let actions = result?.actions {
                 fresh.actionItems = actions
             }
+            // 章节(#68)同摘要/标题口径:成功即覆盖,失败(含降级短路径)清空——章节锚的是旧全文会误导跳播。
+            fresh.chapters = result?.chapters
         }
         fresh.updatedAt = Date()
         retranscribeBackup.removeValue(forKey: record.id)
@@ -275,6 +280,15 @@ final class TranscriptionCenter: ObservableObject {
         var title: String?
         var summary: String?
         var actions: [ActionItem]?
+        /// 长录音章节(#68):只有分块路径产出;短录音/降级路径 nil。
+        var chapters: [Chapter]? = nil
+    }
+
+    /// 块级摘要(#68)的规整结果:章节标题+要点+该块待办。
+    private struct ChunkResult {
+        var sectionTitle: String
+        var keyPoints: String
+        var actions: [ActionItem]
     }
 
     /// 「今天」上下文(#61 修正):转写正文里通常没有日期,模型只能瞎猜基准日——
@@ -298,8 +312,13 @@ final class TranscriptionCenter: ObservableObject {
 
     /// 三级瀑布(#39):本机 Foundation Models(可用必优先)→ 云端(已配置)→ 留空+状态卡说明。
     /// 国行 iPhone 无 Apple 智能,云端是主力用户实际吃到摘要卡的路径。
-    private func digest(transcript: String) async -> DigestResult? {
+    /// 长录音(#68):分段超单块口径→先走分块理解+合并;任何一块失败整条退回本短路径
+    /// (首 4000 字)——降级永远不比旧版差。合并复用本函数(压縮文本不再超限,天然短路径)。
+    private func digest(transcript: String, segments: [TranscriptSegment]? = nil) async -> DigestResult? {
         guard !transcript.isEmpty else { return nil }
+        if let blocks = TranscriptChunking.blocks(segments), let long = await longDigest(blocks: blocks) {
+            return long
+        }
         let model = SystemLanguageModel.default
         if model.isAvailable, let result = await onDeviceDigest(transcript: transcript, model: model) {
             return result
@@ -322,6 +341,150 @@ final class TranscriptionCenter: ObservableObject {
         return nil
     }
 
+    // MARK: - 长录音分块摘要(#68)
+
+    /// 分块理解→合并(#68):块级 digest 出「章节标题+要点+待办」,拼成小文本再走
+    /// 短路径出全局 类别/标题/摘要/去重待办——全局摘要仍然三句话,但背后看过了全文。
+    /// 章节条=块标题+块起点,合并调用免费带出。引擎选择与短路径同口径:本机可用必优先。
+    private func longDigest(blocks: [TranscriptChunking.Block]) async -> DigestResult? {
+        let model = SystemLanguageModel.default
+        var chunks: [ChunkResult] = []
+        if model.isAvailable {
+            for block in blocks {
+                guard let chunk = await onDeviceChunkDigest(block: block, model: model) else {
+                    DayTapLog.transcribe.info("long digest on-device chunk failed, fall back to short path")
+                    return nil
+                }
+                chunks.append(chunk)
+            }
+        } else if LLMSettings.isConfigured {
+            for block in blocks {
+                guard let chunk = await cloudChunkDigest(block: block) else {
+                    DayTapLog.transcribe.info("long digest cloud chunk failed, fall back to short path")
+                    return nil
+                }
+                chunks.append(chunk)
+            }
+        } else {
+            // 两引擎都不在:交给外层短路径去给「不可用」状态卡,这里不重复说话。
+            return nil
+        }
+        var parts: [String] = []
+        var actionLines: [String] = []
+        for (index, chunk) in chunks.enumerated() {
+            parts.append("【第\(index + 1)章 \(chunk.sectionTitle)】\(chunk.keyPoints)")
+            for action in chunk.actions {
+                var line = "· \(action.text)"
+                if let due = action.dueAt {
+                    line += "（截止 \(Self.dueLineFormatter.string(from: due))）"
+                }
+                if action.direction == .other { line += "（别人答应的）" }
+                actionLines.append(line)
+            }
+        }
+        if !actionLines.isEmpty {
+            parts.append("以上各片段提到的待办候选:\n" + actionLines.joined(separator: "\n"))
+        }
+        guard var merged = await digest(transcript: parts.joined(separator: "\n")) else { return nil }
+        merged.chapters = zip(blocks, chunks).map {
+            Chapter(title: String($1.sectionTitle.prefix(8)), start: $0.start)
+        }
+        return merged
+    }
+
+    /// 块摘要的日期行口径(#68):与 ActionItem.parseDue 吃的 16 位格式一致,合并层原样过。
+    private static let dueLineFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+
+    /// 两引擎块输出的统一规整(#68):去空串、同文去重(#62 口径)、方向未知视作 me(#70)。
+    private static func chunkResult(
+        sectionTitle: String,
+        keyPoints: String,
+        actionTuples: [(text: String, due: String, direction: String)]
+    ) -> ChunkResult {
+        var seen = Set<String>()
+        let actions = actionTuples.compactMap { tuple -> ActionItem? in
+            let text = tuple.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, seen.insert(text).inserted else { return nil }
+            return ActionItem(
+                text: text,
+                dueAt: ActionItem.parseDue(tuple.due),
+                direction: ActionDirection(rawValue: tuple.direction)
+            )
+        }
+        return ChunkResult(
+            sectionTitle: sectionTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyPoints: keyPoints.trimmingCharacters(in: .whitespacesAndNewlines),
+            actions: actions
+        )
+    }
+
+    /// 本机块摘要(#68):ChunkDigest 一次出 章节标题+要点+待办(带截止与方向)。
+    private func onDeviceChunkDigest(block: TranscriptChunking.Block, model: SystemLanguageModel) async -> ChunkResult? {
+        let session = LanguageModelSession(
+            model: model,
+            instructions: "你整理中文语音录音转写的一个片段。只依据片段内容作答,用简体中文,不要发明片段里没有的信息。"
+        )
+        do {
+            let response = try await session.respond(
+                to: Self.digestContext + "\n片段如下:\n\(block.text)",
+                generating: ChunkDigest.self
+            )
+            let raw = response.content
+            let deadlines = raw.actionDeadlines
+            let directions = raw.actionDirections
+            let tuples = raw.actionItems.enumerated().map { index, text in
+                (text: text,
+                 due: index < deadlines.count ? deadlines[index] : "",
+                 direction: index < directions.count ? directions[index] : "me")
+            }
+            return Self.chunkResult(sectionTitle: raw.sectionTitle, keyPoints: raw.keyPoints, actionTuples: tuples)
+        } catch {
+            DayTapLog.transcribe.info("chunk digest failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// 云端块摘要(#68):与 cloudDigest 同一套宽容 JSON 解析,只是字段换成章节三件套。
+    private func cloudChunkDigest(block: TranscriptChunking.Block) async -> ChunkResult? {
+        guard let client = LLMClient() else { return nil }
+        struct ChunkPayload: Decodable {
+            var sectionTitle: String?
+            var keyPoints: String?
+            var actionItems: [CloudAction]?
+        }
+        do {
+            let reply = try await client.chat(
+                system: "你整理中文语音录音转写的一个片段,只依据片段内容作答,用简体中文,不发明片段里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:sectionTitle(该片段的主题短标题,不超过8个字,无结尾标点),keyPoints(该片段要点,不超过两句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把相对表述按输入第一行的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
+                user: Self.digestContext + "\n片段如下:\n" + block.text
+            )
+            let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else {
+                DayTapLog.transcribe.info("cloud chunk no json in reply")
+                return nil
+            }
+            guard let payload = try? JSONDecoder().decode(ChunkPayload.self, from: Data(text[start...end].utf8)) else {
+                DayTapLog.transcribe.info("cloud chunk bad json head=\(text[start...].prefix(200), privacy: .public)")
+                return nil
+            }
+            let tuples = (payload.actionItems ?? []).map { action in
+                (text: action.text ?? "", due: action.due ?? "", direction: action.direction ?? "me")
+            }
+            return Self.chunkResult(
+                sectionTitle: payload.sectionTitle ?? "片段",
+                keyPoints: payload.keyPoints ?? "",
+                actionTuples: tuples
+            )
+        } catch {
+            DayTapLog.transcribe.info("cloud chunk failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     private func onDeviceDigest(transcript: String, model: SystemLanguageModel) async -> DigestResult? {
         let session = LanguageModelSession(
             model: model,
@@ -339,11 +502,13 @@ final class TranscriptionCenter: ObservableObject {
             // #62:先按下标配对再过滤空串——原实现过滤 text 不过滤 deadline,
             // 模型输出中间空串时其后所有截止时间整体左移挂错人。
             let deadlines = raw.actionDeadlines
+            let directions = raw.actionDirections
             let paired = raw.actionItems.enumerated().compactMap { index, rawText -> ActionItem? in
                 let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return nil }
                 let due = index < deadlines.count ? ActionItem.parseDue(deadlines[index]) : nil
-                return ActionItem(text: text, dueAt: due)
+                let direction = index < directions.count ? ActionDirection(rawValue: directions[index]) : nil
+                return ActionItem(text: text, dueAt: due, direction: direction)
             }
             // 同文去重(#62):转写重复口述会让 AI 出两条一样的待办,text 即 id,撞则行为未定义。
             var seen = Set<String>()
@@ -375,30 +540,12 @@ final class TranscriptionCenter: ObservableObject {
             var category: String?
             var title: String?
             var summary: String?
-            // #61:actionItems 兼容两种形态——新 [{text,due}] 与旧裸字符串数组。
+            // #61:actionItems 兼容两种形态——新 [{text,due,direction}] 与旧裸字符串数组。
             var actionItems: [CloudAction]?
-        }
-
-        struct CloudAction: Decodable {
-            var text: String?
-            var due: String?
-
-            init(from decoder: Decoder) throws {
-                if let plain = try? decoder.singleValueContainer().decode(String.self) {
-                    text = plain
-                    due = nil
-                    return
-                }
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                text = try container.decodeIfPresent(String.self, forKey: .text)
-                due = try container.decodeIfPresent(String.self, forKey: .due)
-            }
-
-            enum CodingKeys: String, CodingKey { case text, due }
         }
         do {
             let reply = try await client.chat(
-                system: "你整理中文语音录音的转写全文,只依据全文作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
+                system: "你整理中文语音录音的转写全文,只依据全文内容作答,用简体中文,不发明全文里没有的信息。只输出一个 JSON 对象(不要 markdown 代码块),字段:category(必须是 会议/活动/灵感/日常/其他 之一),title(不超过12字,无结尾标点),summary(不超过三句话),actionItems(对象数组,每项 {text:待办一句话, direction:\"me\"或\"other\"(我答应别人的=me,别人答应我的=other,拿不准给 me), due:截止时间 yyyy-MM-dd HH:mm,把「周五下午」「下月1号」这类相对表述按输入第一行给出的今天换算成具体日期,没有明确时间给空字符串},没有待办给空数组)。",
                 user: Self.digestContext + "\n" + String(transcript.prefix(4000))
             )
             let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -426,7 +573,11 @@ final class TranscriptionCenter: ObservableObject {
                           !text.isEmpty,
                           seen.insert(text).inserted  // 同文去重(#62)
                     else { return nil }
-                    return ActionItem(text: text, dueAt: raw.due.flatMap(ActionItem.parseDue))
+                    return ActionItem(
+                        text: text,
+                        dueAt: raw.due.flatMap(ActionItem.parseDue),
+                        direction: raw.direction.flatMap(ActionDirection.init)
+                    )
                 }
             return DigestResult(
                 category: category,
@@ -501,11 +652,12 @@ final class TranscriptionCenter: ObservableObject {
             defer { backfillRunning = false }
             for record in candidates {
                 guard var fresh = library.record(id: record.id), let transcript = fresh.transcript else { continue }
-                if let result = await digest(transcript: transcript) {
+                if let result = await digest(transcript: transcript, segments: fresh.transcriptSegments) {
                     if fresh.category == nil { fresh.category = result.category }
                     if fresh.autoTitle == nil { fresh.autoTitle = result.title }
                     if fresh.summary == nil { fresh.summary = result.summary }
                     if fresh.actionItems == nil { fresh.actionItems = result.actions }
+                    if fresh.chapters == nil { fresh.chapters = result.chapters }
                     fresh.updatedAt = Date()
                     library.upsert(fresh)
                 }
@@ -531,6 +683,46 @@ struct RecordingDigest {
     var actionItems: [String]
     @Guide(description: "与 actionItems 一一对应的截止时间数组,格式 yyyy-MM-dd HH:mm;把「周五下午」「下月1号」这类相对表述换算成具体日期,今天的日期在输入第一行给出,以它为基准;该条没有明确时间就给空字符串")
     var actionDeadlines: [String]
+    @Guide(description: "与 actionItems 一一对应的方向数组:\"me\"=我答应别人的,\"other\"=别人答应我的;拿不准给 \"me\"")
+    var actionDirections: [String]
+}
+
+/// @Generable 的块级结构化输出(#68):长录音分块摘要用,一次产出 章节标题+要点+待办。
+@Generable
+struct ChunkDigest {
+    @Guide(description: "该片段的主题短标题,不超过8个字,不要句号等结尾标点")
+    var sectionTitle: String
+    @Guide(description: "该片段的要点,不超过两句话")
+    var keyPoints: String
+    @Guide(description: "片段里提到的待办事项,每条一句话;没有待办就给空列表")
+    var actionItems: [String]
+    @Guide(description: "与 actionItems 一一对应的截止时间数组,格式 yyyy-MM-dd HH:mm;把相对表述按输入第一行的今天换算成具体日期;没有明确时间就给空字符串")
+    var actionDeadlines: [String]
+    @Guide(description: "与 actionItems 一一对应的方向数组:\"me\"=我答应别人的,\"other\"=别人答应我的;拿不准给 \"me\"")
+    var actionDirections: [String]
+}
+
+/// 云端 actionItems 的宽容解码(#61→#70):兼容旧裸串、新 {text,due,direction};
+/// direction 只认 me/other,未知值解码后仍是 nil(呈现上视作 me)。
+private struct CloudAction: Decodable {
+    var text: String?
+    var due: String?
+    var direction: String?
+
+    init(from decoder: Decoder) throws {
+        if let plain = try? decoder.singleValueContainer().decode(String.self) {
+            text = plain
+            due = nil
+            direction = nil
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        due = try container.decodeIfPresent(String.self, forKey: .due)
+        direction = try? container.decodeIfPresent(String.self, forKey: .direction)
+    }
+
+    enum CodingKeys: String, CodingKey { case text, due, direction }
 }
 
 enum TranscriptionError: LocalizedError {
