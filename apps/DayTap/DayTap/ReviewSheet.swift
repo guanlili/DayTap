@@ -52,6 +52,29 @@ struct ReviewSheet: View {
                         LabeledContent("最近 7 天", value: "\(weekRecords.count) 条 · \(Self.durationText(weekRecords))")
                     }
 
+                    Section("成就") {
+                        let earned = Achievements.earned(library.records, now: Date())
+                        if earned.isEmpty {
+                            Text("录第一条,成就就会在这里点亮。")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(earned) { badge in
+                                        Label(badge.title, systemImage: badge.symbol)
+                                            .font(.caption)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                Capsule().fill(Color.accentColor.opacity(0.14))
+                                            )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Section("类别分布 · 最近 7 天") {
                         let maxCount = categoryCounts.first?.count ?? 1
                         ForEach(categoryCounts, id: \.name) { item in
@@ -86,6 +109,9 @@ struct ReviewSheet: View {
                             }
                             if let count = week.workoutCount, let minutes = week.workoutMinutes {
                                 LabeledContent("锻炼", value: "\(count) 次 · \(minutes) 分钟")
+                            }
+                            if let resting = week.restingHeartRate {
+                                LabeledContent("静息心率", value: "日均 \(resting)")
                             }
                             Text("来自这台 iPhone 的健康数据(手表自动汇入);只在本机展示,不上传。")
                                 .font(.caption2)

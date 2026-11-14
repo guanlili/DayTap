@@ -94,6 +94,13 @@ struct TodayView: View {
                             .buttonStyle(.borderless)
                             .accessibilityLabel("播放今天提到\(mention.name)的录音")
                         }
+                        // 人物反向提醒(#85 最小版):最近提过、但三天没见的人,打开时提一嘴;不推送。
+                        let quiet = DayAgenda.peopleQuietFor(library.records, now: Date())
+                        if !quiet.isEmpty {
+                            Text("三天没提到了:\(quiet.joined(separator: "、"))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Spacer(minLength: 0)

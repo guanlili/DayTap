@@ -25,6 +25,7 @@ enum HealthReader {
             HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
             HKObjectType.quantityType(forIdentifier: .stepCount),
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
+            HKObjectType.quantityType(forIdentifier: .restingHeartRate),
             HKObjectType.workoutType(),
         ]
         return Set(types.compactMap { $0 })
@@ -74,9 +75,12 @@ enum HealthReader {
         var kcalTotal: Double?
         var workoutCount: Int?
         var workoutMinutes: Int?
+        /// 静息心率·窗口日均(#87);没数据 nil。
+        var restingHeartRate: Int?
 
         var hasAny: Bool {
-            sleepHoursTotal != nil || stepsTotal != nil || kcalTotal != nil || workoutCount != nil
+            sleepHoursTotal != nil || stepsTotal != nil || kcalTotal != nil
+                || workoutCount != nil || restingHeartRate != nil
         }
     }
 
@@ -91,13 +95,32 @@ enum HealthReader {
         async let steps = quantitySum(store, .stepCount, unit: .count(), from: windowStart)
         async let kcal = quantitySum(store, .activeEnergyBurned, unit: .kilocalorie(), from: windowStart)
         async let workouts = workoutTotals(store, from: windowStart)
+        async let resting = restingHeartRateAverage(store, from: windowStart)
         return await WeekSummary(
             sleepHoursTotal: sleep?.hours,
             stepsTotal: steps,
             kcalTotal: kcal,
             workoutCount: workouts?.count,
-            workoutMinutes: workouts?.minutes
+            workoutMinutes: workouts?.minutes,
+            restingHeartRate: resting.map { Int($0.rounded()) }
         )
+    }
+
+    /// 静息心率·日均(#87):离散平均,窗口内没样本返回 nil。
+    private static func restingHeartRateAverage(_ store: HKHealthStore, from windowStart: Date) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: .restingHeartRate) else { return nil }
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: HKQuery.predicateForSamples(withStart: windowStart, end: Date()),
+                options: .discreteAverage
+            ) { _, statistics, _ in
+                continuation.resume(
+                    returning: statistics?.averageQuantity()?.doubleValue(for: .count().unitDivided(by: .minute()))
+                )
+            }
+            store.execute(query)
+        }
     }
 
     /// 窗口内锻炼:次数与总分钟。

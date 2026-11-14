@@ -106,6 +106,33 @@ enum DayAgenda {
         }
     }
 
+    /// 人物反向提醒(#85 最小版):观察窗 windowDays 天内出现过、但已 silentDays 天没提到的人。
+    /// 只在打开时算一行字,不做推送;没提过的人不进(避免报一堆陌生名字)。
+    static func peopleQuietFor(
+        _ records: [RecordingRecord],
+        now: Date,
+        silentDays: Int = 3,
+        windowDays: Int = 14,
+        calendar: Calendar = .current
+    ) -> [String] {
+        let windowStart = calendar.date(byAdding: .day, value: -windowDays, to: now) ?? now
+        let quietCutoff = calendar.date(byAdding: .day, value: -silentDays, to: now) ?? now
+        var lastMention: [String: Date] = [:]
+        for record in records where record.deletedAt == nil {
+            guard record.createdAt > windowStart else { continue }
+            for raw in Set(record.people ?? []) {
+                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { continue }
+                if lastMention[name] == nil || record.createdAt > lastMention[name]! {
+                    lastMention[name] = record.createdAt
+                }
+            }
+        }
+        return lastMention
+            .filter { _, last in last <= quietCutoff }
+            .keys.sorted()
+    }
+
     // MARK: - 今日安排建议(#80 P0)
 
     /// AI 排程建议的一条:标题+理由+建议时段。kind 只作图标语义,不参与逻辑。

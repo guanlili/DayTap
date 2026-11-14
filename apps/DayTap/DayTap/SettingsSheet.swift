@@ -17,6 +17,8 @@ struct SettingsSheet: View {
     @State private var apiKey: String
     @State private var aboutMe: String
     @State private var showContextPreview = false
+    // #89 实验室:翻腕开录(App Group 直写,手表侧即读即用)。
+    @State private var tiltLab = UserDefaults(suiteName: "group.com.guanhongli.daytap")?.bool(forKey: "lab.tiltToRecord") ?? false
     @State private var testResult: (ok: Bool, message: String)?
     @State private var testing = false
 
@@ -211,6 +213,15 @@ struct SettingsSheet: View {
                     Text("数据去向")
                 }
 
+                // 实验室(#89):翻腕开录,手表侧读共享容器;默认关。
+                Section {
+                    Toggle("翻腕开录", isOn: $tiltLab)
+                } header: {
+                    Text("实验室")
+                } footer: {
+                    Text("打开后,手表 App 在前台闲时,表盘翻向地面保持约 1 秒即开始录音。手势还在调优期,误触就关掉。")
+                }
+
                 Section {
                     LabeledContent("版本", value: "开发版")
                 } header: {
@@ -234,6 +245,9 @@ struct SettingsSheet: View {
                 persist()
             }
             .onChange(of: modelSelection) { _, _ in persist() }
+            .onChange(of: tiltLab) { _, on in
+                UserDefaults(suiteName: "group.com.guanhongli.daytap")?.set(on, forKey: "lab.tiltToRecord")
+            }
             .onChange(of: cloudEnabled) { _, on in
                 CloudSyncSettings.enabled = on
                 cloudSync.settingsChanged()

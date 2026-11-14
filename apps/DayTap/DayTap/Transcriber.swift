@@ -158,15 +158,24 @@ final class TranscriptionCenter: ObservableObject {
     /// 自动队列条件:在列(未软删)、没转过(转了没内容的也不重试,#44)、本次会话没失败过、
     /// 音频在、时长 ≤2h(超长留给手动,内存/耗时护栏)。
     private func autoCandidates() -> [RecordingRecord] {
-        library.snapshot().filter { record in
-            record.deletedAt == nil
-                && record.transcript == nil
-                && record.transcribedAt == nil
-                && !autoFailedIDs.contains(record.id)
-                && record.byteCount >= 1024
-                && record.durationSeconds <= 7200
-                && FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
-        }
+        // #88 会议自动优先:录音时刻落在日历占用区间的插队(两类各自仍按时间正序);
+        // 未授权日历时 contains 恒 false,顺序退化为纯时间序——零变化。
+        library.snapshot()
+            .filter { record in
+                record.deletedAt == nil
+                    && record.transcript == nil
+                    && record.transcribedAt == nil
+                    && !autoFailedIDs.contains(record.id)
+                    && record.byteCount >= 1024
+                    && record.durationSeconds <= 7200
+                    && FileManager.default.fileExists(atPath: library.fileURL(id: record.id).path)
+            }
+            .sorted { lhs, rhs in
+                let lhsBusy = CalendarBusy.contains(lhs.createdAt)
+                let rhsBusy = CalendarBusy.contains(rhs.createdAt)
+                if lhsBusy != rhsBusy { return lhsBusy }
+                return lhs.createdAt < rhs.createdAt
+            }
     }
 
     /// 电量护栏:接电源(充电中/已充满)或电量≥50% 才自动转。
@@ -258,6 +267,10 @@ final class TranscriptionCenter: ObservableObject {
             let result = await digest(transcript: trimmed, segments: segments)
             if fresh.category == nil {
                 fresh.category = result?.category
+            }
+            // #88 会议兜底:日历占用时段录的音,digest 没给出类别时归「会议」。
+            if fresh.category == nil, CalendarBusy.contains(record.createdAt) {
+                fresh.category = "会议"
             }
             fresh.autoTitle = result?.title
             fresh.summary = result?.summary

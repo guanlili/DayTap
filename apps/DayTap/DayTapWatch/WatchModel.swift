@@ -41,6 +41,8 @@ final class WatchModel: ObservableObject {
     private let link = WatchLink.shared
     /// 敲桌两下检测(#11):只在闲时前台开,回表盘/录音中即停。
     private let knock = KnockDetector()
+    // #89 翻腕开录(实验室):默认关,「我的 → 实验室」经 App Group 开过来。
+    private let tilt = TiltDetector()
     private var timer: Timer?
     private var startedAt: Date?
     private var recordingID: String?
@@ -54,6 +56,11 @@ final class WatchModel: ObservableObject {
         knock.onTrigger = { [weak self] in
             guard let self, phase == .idle else { return }
             DayTapLog.motion.info("knock → begin")
+            toggle()
+        }
+        tilt.onTrigger = { [weak self] in
+            guard let self, phase == .idle else { return }
+            DayTapLog.motion.info("tilt → begin")
             toggle()
         }
         syncTransferState()
@@ -118,9 +125,20 @@ final class WatchModel: ObservableObject {
         if active {
             guard phase == .idle, !knock.isRunning else { return }
             knock.start()
+            // #89:实验室开关开着才听翻腕;开关变化下次回前台生效(经共享容器读)。
+            if tiltLabEnabled, !tilt.isRunning {
+                tilt.start()
+            } else {
+                tilt.stop()
+            }
         } else {
             knock.stop()
+            tilt.stop()
         }
+    }
+
+    private var tiltLabEnabled: Bool {
+        UserDefaults(suiteName: "group.com.guanhongli.daytap")?.bool(forKey: "lab.tiltToRecord") ?? false
     }
 
     /// 再交一次还没被 iPhone 确认的文件。不开麦。

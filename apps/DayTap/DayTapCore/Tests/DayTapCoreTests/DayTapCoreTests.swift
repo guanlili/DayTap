@@ -768,3 +768,63 @@ func testToggleActionItemPersists() {
     library.toggleActionItem(recordID: "nope", updated: ActionItem(text: "x"))
 }
 }
+
+extension DayTapCoreTests {
+// MARK: - #86 成就
+
+private static func achievementRecord(id: String, daysAgo: Int, todos: [ActionItem] = []) -> RecordingRecord {
+    var record = Self.record(id: id)
+    record.createdAt = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+    record.actionItems = todos.isEmpty ? nil : todos
+    return record
+}
+
+func testAchievementsEarned() {
+    let honored = (1...10).map { ActionItem(text: "t\($0)", isDone: true) }
+    let clean = (1...3).map { ActionItem(text: "c\($0)", isDone: true) }
+    var records = (0..<7).map { Self.achievementRecord(id: "d\($0)", daysAgo: $0) }   // 连续 7 天
+    records.append(contentsOf: (0..<43).map { Self.achievementRecord(id: "x\($0)", daysAgo: 20 + $0) })
+    records.append(Self.achievementRecord(id: "honor", daysAgo: 1, todos: honored))
+    records.append(Self.achievementRecord(id: "clean", daysAgo: 1, todos: clean))
+    let ids = Set(Achievements.earned(records, now: Date()).map(\.id))
+    // 51 条→第一次+五十条;连续 7 天→streak7;兑现 10→honored10;本周 3 条全勾→cleared。
+    XCTAssertEqual(ids, ["first", "streak7", "fifty", "honored10", "cleared"])
+}
+
+func testAchievementsEmptyAndStreakTolerance() {
+    // 空库:零成就。
+    XCTAssertTrue(Achievements.earned([], now: Date()).isEmpty)
+    // 只有 6 天:streak 不亮(今天没录从昨天起算的宽容口径仍差一天)。
+    let six = (1...6).map { Self.achievementRecord(id: "s\($0)", daysAgo: $0) }
+    XCTAssertFalse(Achievements.earned(six, now: Date()).map(\.id).contains("streak7"))
+    // 加上今天=7 天:亮(今天没录不打断的反例——今天录了自然算)。
+    var seven = six
+    seven.append(Self.achievementRecord(id: "today", daysAgo: 0))
+    XCTAssertTrue(Achievements.earned(seven, now: Date()).map(\.id).contains("streak7"))
+}
+}
+
+extension DayTapCoreTests {
+// MARK: - #85 人物静默提醒
+
+func testPeopleQuietFor() {
+    let calendar = Calendar.current
+    let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 20))!
+    var recent = Self.record(id: "recent")
+    recent.createdAt = calendar.date(byAdding: .day, value: -1, to: now)!  // 昨天提过:不提醒
+    recent.people = ["小周"]
+    var fading = Self.record(id: "fading")
+    fading.createdAt = calendar.date(byAdding: .day, value: -5, to: now)!  // 5 天没提:提醒
+    fading.people = ["王总"]
+    var ancient = Self.record(id: "ancient")
+    ancient.createdAt = calendar.date(byAdding: .day, value: -20, to: now)! // 出观察窗:不报
+    ancient.people = ["老李"]
+    let quiet = DayAgenda.peopleQuietFor([recent, fading, ancient], now: now)
+    XCTAssertEqual(quiet, ["王总"])
+    // 今天提过的更不提醒。
+    var today = Self.record(id: "today")
+    today.createdAt = now
+    today.people = ["小周"]
+    XCTAssertEqual(DayAgenda.peopleQuietFor([recent, fading, ancient, today], now: now), ["王总"])
+}
+}
