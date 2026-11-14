@@ -240,11 +240,12 @@ struct TranscriptView: View {
                 Text(DayTapFormat.clock(clock.elapsed))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Slider(value: Binding(
-                    get: { clock.progress },
-                    set: { player.scrub(to: $0) }
-                ), in: 0...1)
-                .tint(.red)
+                DensityScrubber(
+                    segments: record.transcriptSegments,
+                    duration: max(record.durationSeconds, 0.1),
+                    progress: clock.progress,
+                    onScrub: { player.scrub(to: $0) }
+                )
                 Text(DayTapFormat.clock(player.duration))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)

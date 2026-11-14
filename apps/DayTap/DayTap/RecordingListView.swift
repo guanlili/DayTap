@@ -1059,11 +1059,13 @@ private struct PlaybackBarView: View {
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
 
-            Slider(value: Binding(
-                get: { clock.progress },
-                set: { player.scrub(to: $0) }
-            ), in: 0...1)
-            .tint(.red)
+            // 密度播放条(#69):轨道按分段字数着色,长录一眼找「讲得密的段」;拖动/点按与原 Slider 一致。
+            DensityScrubber(
+                segments: record.transcriptSegments,
+                duration: max(record.durationSeconds, 0.1),
+                progress: clock.progress,
+                onScrub: { player.scrub(to: $0) }
+            )
         }
         .accessibilityIdentifier("daytap.playback.\(record.id)")
     }

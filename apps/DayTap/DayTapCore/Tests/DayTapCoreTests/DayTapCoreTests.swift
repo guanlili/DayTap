@@ -176,6 +176,38 @@ final class DayTapCoreTests: XCTestCase {
         XCTAssertEqual(LLMSettings.aboutMe, "同事小周、青云项目")
     }
 
+    // MARK: - 语义密度(#69)
+
+    /// 降级口径:无分段/空数组/时长非正/全空文本 → nil,调用方走纯色条。
+    func testSpeechDensityDegrades() {
+        XCTAssertNil(SpeechDensity.buckets(nil, duration: 60))
+        XCTAssertNil(SpeechDensity.buckets([], duration: 60))
+        XCTAssertNil(SpeechDensity.buckets(nil, duration: 0))
+        XCTAssertNil(SpeechDensity.buckets([TranscriptSegment(text: "", start: 0, duration: 5)], duration: 60))
+    }
+
+    /// 半密半静:前半每秒一句、后半无话——前半高后半零,峰值归一到 1,平滑只渗一桶。
+    func testSpeechDensityHalfHalf() {
+        let dense = (0..<10).map { i in
+            TranscriptSegment(text: "五个字的话", start: Double(i), duration: 0.9)
+        }
+        let density = SpeechDensity.buckets(dense, duration: 20, count: 20)!
+        XCTAssertEqual(density.count, 20)
+        XCTAssertEqual(density.max()!, 1, accuracy: 0.001)
+        XCTAssertGreaterThan(density[5], 0.5)
+        XCTAssertEqual(density[15], 0, accuracy: 0.0001)
+        XCTAssertEqual(density[19], 0, accuracy: 0.0001)
+    }
+
+    /// 越界段(start+duration 超总时长)不崩:摊进末尾桶,前面的桶有值。
+    func testSpeechDensityClampsBeyondDuration() {
+        let rogue = TranscriptSegment(text: "尾巴", start: 59, duration: 30)
+        let density = SpeechDensity.buckets([rogue], duration: 60, count: 10)!
+        XCTAssertEqual(density.count, 10)
+        XCTAssertGreaterThan(density[9], 0)
+        XCTAssertGreaterThan(density[8], 0)
+    }
+
     // MARK: - 工具
 
     private static func record(
